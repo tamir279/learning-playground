@@ -25,6 +25,8 @@
 #define TRIANGLE_POL 3
 #define QUAD_POL 4
 
+#define GJK_EPSILON 1.19209290E-02F
+
 void translate_vertices_LEGACY_GL(std::vector<std::vector<std::vector<GLfloat>>>& vertices_per_object,
 	std::vector<std::vector<GLfloat>>& vertex_vec) {
 	for (int i = 0; i < (int)vertices_per_object.size(); i++) {
@@ -89,18 +91,18 @@ void generate_tinyCONVEX_mesh(std::vector<std::vector<GLfloat>>& mesh, GLfloat c
 	GLfloat z_0 = center[2];
 
 	GLfloat vdata[] = {
-	   -X + x_0, 0.0 + y_0, Z + z_0,
-	   X + x_0, 0.0 + y_0, Z + z_0,
-	   -X + x_0, 0.0 + y_0, -Z + z_0,
-	   X + x_0, 0.0 + y_0, -Z + z_0,
-	   0.0 + x_0, Z + y_0, X + z_0,
-	   0.0 + x_0, Z + y_0, -X + z_0,
-	   0.0 + x_0, -Z + y_0, X + z_0,
-	   0.0 + x_0, -Z + y_0, -X + z_0,
-	   Z + x_0, X + y_0, 0.0 + z_0,
-	   -Z + x_0, X + y_0, 0.0 + z_0,
-	   Z + x_0, -X + y_0, 0.0 + z_0,
-	   -Z + x_0, -X + y_0, 0.0 + z_0
+	   -X + x_0, y_0, Z + z_0,
+	   X + x_0, y_0, Z + z_0,
+	   -X + x_0, y_0, -Z + z_0,
+	   X + x_0, y_0, -Z + z_0,
+	   x_0, Z + y_0, X + z_0,
+	   x_0, Z + y_0, -X + z_0,
+	   x_0, -Z + y_0, X + z_0,
+	   x_0, -Z + y_0, -X + z_0,
+	   Z + x_0, X + y_0, z_0,
+	   -Z + x_0, X + y_0, z_0,
+	   Z + x_0, -X + y_0, z_0,
+	   -Z + x_0, -X + y_0, z_0
 	};
 	GLushort indices[] = {
 	   0,4,1,
@@ -132,11 +134,12 @@ void generate_tinyCONVEX_mesh(std::vector<std::vector<GLfloat>>& mesh, GLfloat c
 float fast_sqrt(float num) {
 	// initial guess
 	float x = 10.0;
-	int iters = 3;
+	int iters = num > 35 ? 2 : 3;
 
 	int i = 0;
 	while (i < iters) {
 		x = (x * x * x + 3 * num * x) / (3 * x * x + num);
+		i++;
 	}
 
 	return x;
@@ -201,21 +204,21 @@ void generate_tinySPHERE_mesh(std::vector<std::vector<GLfloat>>& mesh, GLfloat c
 	GLfloat y_0 = center[1];
 	GLfloat z_0 = center[2];
 
-	static GLfloat vdata[12][3] = {
-	   {-X + x_0, 0.0 + y_0, Z + z_0},
-	   {X + x_0, 0.0 + y_0, Z + z_0},
-	   {-X + x_0, 0.0 + y_0, -Z + z_0},
-	   {X + x_0, 0.0 + y_0, -Z + z_0},
-	   {0.0 + x_0, Z + y_0, X + z_0},
-	   {0.0 + x_0, Z + y_0, -X + z_0},
-	   {0.0 + x_0, -Z + y_0, X + z_0},
-	   {0.0 + x_0, -Z + y_0, -X + z_0},
-	   {Z + x_0, X + y_0, 0.0 + z_0},
-	   {-Z + x_0, X + y_0, 0.0 + z_0},
-	   {Z + x_0, -X + y_0, 0.0 + z_0},
-	   {-Z + x_0, -X + y_0, 0.0 + z_0}
+	GLfloat vdata[12][3] = {
+	   {-X + x_0, y_0, Z + z_0},
+	   {X + x_0, y_0, Z + z_0},
+	   {-X + x_0, y_0, -Z + z_0},
+	   {X + x_0, y_0, -Z + z_0},
+	   {x_0, Z + y_0, X + z_0},
+	   {x_0, Z + y_0, -X + z_0},
+	   {x_0, -Z + y_0, X + z_0},
+	   {x_0, -Z + y_0, -X + z_0},
+	   {Z + x_0, X + y_0, z_0},
+	   {-Z + x_0, X + y_0, z_0},
+	   {Z + x_0, -X + y_0, z_0},
+	   {-Z + x_0, -X + y_0, z_0}
 	};
-	static GLuint indices[20][3] = {
+	GLuint indices[20][3] = {
 	   {0,4,1}, {0,9,4}, {9,5,4}, {4,5,8}, {4,8,1},
 	   {8,10,1}, {8,3,10}, {5,3,8}, {5,2,3}, {2,7,3},
 	   {7,10,3}, {7,6,10}, {7,11,6}, {11,0,6}, {0,1,6},
@@ -303,12 +306,14 @@ GLfloat* geometrig_center(std::vector<std::vector<GLfloat>>& model_mesh) {
 	GLfloat scale = (GLfloat)(1 / model_mesh.size());
 	scale_3Dvectors(center, scale);
 
-	GLfloat geomCenter[3];
+	static GLfloat geomCenter[3];
 	std::copy(center.begin(), center.end(), geomCenter);
 
 	return geomCenter;
 }
 
+// detects if the bounding mesh is within the mesh or covering it. if it covers the mesh completely - return true
+// else - return false
 bool detect_boundries(std::vector<std::vector<GLfloat>>& model_mesh,
 	std::vector<std::vector<GLfloat>>& bounding_mesh, GLfloat center[]) {
 
@@ -319,14 +324,14 @@ bool detect_boundries(std::vector<std::vector<GLfloat>>& model_mesh,
 
 	bool broke = false;
 	for (int l1 = 0; l1 < (int)model_mesh.size(); l1++) {
-		float d1 = sqrt((float)(model_mesh[l1][0] * model_mesh[l1][0]) +
+		float d1 = fast_sqrt((float)(model_mesh[l1][0] * model_mesh[l1][0]) +
 			(float)(model_mesh[l1][1] * model_mesh[l1][1]) +
 			(float)(model_mesh[l1][2] * model_mesh[l1][2]));
 		for (int l2 = 0; l2 < (int)bounding_mesh.size(); l2++) {
-			float d2 = sqrt((float)(bounding_mesh[l2][0] * bounding_mesh[l2][0]) +
+			float d2 = fast_sqrt((float)(bounding_mesh[l2][0] * bounding_mesh[l2][0]) +
 				(float)(bounding_mesh[l2][1] * bounding_mesh[l2][1]) +
 				(float)(bounding_mesh[l2][2] * bounding_mesh[l2][2]));
-			if (d1 <= d2) {
+			if (d1 > d2) {
 				broke = true;
 				break;
 			}
@@ -335,9 +340,10 @@ bool detect_boundries(std::vector<std::vector<GLfloat>>& model_mesh,
 			break;
 		}
 	}
-	return broke;
+	return not broke;
 }
 
+// needed to be tested further - so far, no bugs, just oddities...
 void inflate_mesh(std::vector<std::vector<GLfloat>>& model_mesh,
 	std::vector<std::vector<GLfloat>>& bounding_mesh,
 	GLfloat center[],
@@ -825,7 +831,7 @@ GLfloat* mult_3D_mat_vec(std::vector<std::vector<GLfloat>>& mat, std::vector<GLf
 		}
 		res.push_back(row_res);
 	}
-	GLfloat _r_res[3];
+	static GLfloat _r_res[3];
 	std::copy(res.begin(), res.end(), _r_res);
 	return _r_res;
 }
@@ -971,7 +977,7 @@ GLfloat* create_CenterMass_axis(Rigid_body* rigidBody, std::vector<GLfloat>& ini
 	GLfloat scalar_prod = scalar_mult(force, c_m_axis);
 	scale_3Dvectors(c_m_axis, scalar_prod);
 
-	GLfloat cm_axis[3];
+	static GLfloat cm_axis[3];
 	std::copy(c_m_axis.begin(), c_m_axis.end(), cm_axis);
 	return cm_axis;
 }
@@ -983,7 +989,7 @@ GLfloat* create_tangent_axis(GLfloat* cm_axis, std::vector<GLfloat>& force) {
 	scale_3Dvectors(c_m_axis, -1);
 	add_3Dvectors(tang_axis, c_m_axis);
 
-	GLfloat tan_axis[3];
+	static GLfloat tan_axis[3];
 	std::copy(tang_axis.begin(), tang_axis.end(), tan_axis);
 	return tan_axis;
 }
@@ -1245,132 +1251,452 @@ void apply_force_update_position(Rigid_body* rigid,
 
 /*----------------------------collision physics - simulate a force on a rigid body------------------------------*/
 
-void check_approx_coll(Rigid_body* rigid1, Rigid_body* rigid2, std::vector<GLfloat>& col_pt) {
-
-	std::vector<GLfloat> tmp_colpt = { 0, 0, 0 };
-	std::vector<std::vector<GLfloat>> hitMesh1 = rigid1->hitBoxPos;
-	std::vector<std::vector<GLfloat>> hitMesh2 = rigid2->hitBoxPos;
-	float min_dist1, min_dist2, max_dist1, max_dist2;
-
-	int imp_i, imp_j;
-
-	std::vector<GLfloat> c_wrld = { 0, 0, 0 };
-	std::vector<GLfloat> c_m1 = rigid1->centerOfMass;
-	std::vector<GLfloat> c_m2 = rigid2->centerOfMass;
-	float wrld_dist_sq1 = dist_sq_vec(c_wrld, c_m1);
-	float wrld_dist_sq2 = dist_sq_vec(c_wrld, c_m2);
-
-	if (wrld_dist_sq2 >= wrld_dist_sq1) {
-		max_dist1 = 0.0;
-		min_dist2 = wrld_dist_sq2;
-		// check for maximum distance from the origin
-		for (int i = 0; i < (int)hitMesh1.size(); i++) {
-			if (max_dist1 < dist_sq_vec(c_wrld, hitMesh1[i])) {
-				max_dist1 = dist_sq_vec(c_wrld, hitMesh1[i]);
-				imp_i = i;
-			}
-		}
-		// check for minimum distance from the origin
-		for (int j = 0; j < (int)hitMesh2.size(); j++) {
-			if (min_dist2 > dist_sq_vec(c_wrld, hitMesh2[j])) {
-				min_dist2 = dist_sq_vec(c_wrld, hitMesh2[j]);
-				imp_j = j;
-			}
-		}
-	}
-	else if (wrld_dist_sq2 < wrld_dist_sq1) {
-		max_dist2 = 0.0;
-		min_dist1 = wrld_dist_sq1;
-		// check for maximum distance from the origin
-		for (int j = 0; j < (int)hitMesh2.size(); j++) {
-			if (max_dist2 < dist_sq_vec(c_wrld, hitMesh2[j])) {
-				max_dist2 = dist_sq_vec(c_wrld, hitMesh2[j]);
-				imp_j = j;
-			}
-		}
-		// check for minimum distance from the origin
-		for (int i = 0; i < (int)hitMesh1.size(); i++) {
-			if (min_dist1 > dist_sq_vec(c_wrld, hitMesh1[i])) {
-				min_dist1 = dist_sq_vec(c_wrld, hitMesh1[i]);
-				imp_i = i;
-			}
-		}
-	}
-	add_3Dvectors(tmp_colpt, hitMesh1[imp_i]);
-	add_3Dvectors(tmp_colpt, hitMesh2[imp_j]);
-	scale_3Dvectors(tmp_colpt, 0.5);
-
-	col_pt = tmp_colpt;
+// written like that for speed...
+void subtr_3Dvectors(std::vector<GLfloat>& v_r, std::vector<GLfloat>& v_a) {
+	v_r[0] -= v_a[0];
+	v_r[1] -= v_a[1];
+	v_r[2] -= v_a[2];
 }
 
-void approx_collision_point(Rigid_body* rigid1, Rigid_body* rigid2) {
+void add_toCont3Dvecs(std::vector<GLfloat>& a, std::vector<GLfloat>& b, std::vector<GLfloat>& c) {
+	c[0] = 0.5 * (a[0] + b[0]);
+	c[1] = 0.5 * (a[1] + b[1]);
+	c[2] = 0.5 * (a[2] + b[2]);
+}
 
-	int hit_box1 = rigid1->hitBoxType;
-	int hit_box2 = rigid2->hitBoxType;
+// GJK algorithm for detecting collisions and finding the point of collision
+void GJK_minkowski_diff(Rigid_body* rigid1, Rigid_body* rigid2, std::vector<std::vector<GLfloat>>& res) {
 
-	col_detect col_obj;
-	std::vector<std::vector<GLfloat>> hitMesh1 = rigid1->hitBoxPos;
-	std::vector<std::vector<GLfloat>> hitMesh2 = rigid2->hitBoxPos;
+	std::vector<std::vector<GLfloat>> mesh1 = rigid1->bodyPos;
+	std::vector<std::vector<GLfloat>> mesh2 = rigid2->bodyPos;
+	std::vector<std::vector<GLfloat>> tmp_res;
 
-	if (hit_box1 == BOUNDING_BOX && hit_box2 == BOUNDING_BOX) {
-		if (col_obj.detect_BOX_BOX(hitMesh1, hitMesh2)) {
-			rigid1->collided = true;
-			rigid2->collided = true;
-			std::vector<GLfloat> col_pt;
-			check_approx_coll(rigid1, rigid2, col_pt); 
-			rigid1->collisionPosition = col_pt;
-			rigid2->collisionPosition = col_pt;
+	int i = 0;
+	int j = 0;
+	while (i < (int)mesh1.size()) {
+		std::vector<GLfloat> i_r = mesh1[i];
+		while (j < (int)mesh2.size()) {
+			subtr_3Dvectors(i_r, mesh2[j]);
+			tmp_res.push_back(i_r);
+			j++;
+		}
+		i++;
+	}
+	res = tmp_res;
+}
+
+// not optimal at all but working, I hope...
+// pt = argmin{ <axis,a> | for a in CSO }
+void GJK_shortest_dst_pt(std::vector<std::vector<GLfloat>>& mink_diff,
+	std::vector<GLfloat>& axis,
+	std::vector<GLfloat>& pt) {
+
+	float min_s_p = scalar_mult(mink_diff[0], axis);
+	int min_ind = 0;
+	for (int i = 0; i < (int)mink_diff.size(); i++) {
+		float s_prod = scalar_mult(mink_diff[i], axis);
+		if (min_s_p > s_prod) { min_s_p = s_prod; min_ind = i; }
+	}
+	pt = mink_diff[min_ind];
+}
+
+// the area between the lines is treated as a line itself so the current method suites also for 3D
+// filled 2-simplexes and 3-simplexes (triangles and tetrahedrons)
+void GJK_MinimumNormLine(std::vector<std::vector<GLfloat>>& simplex, std::vector<GLfloat>& pt) {
+
+	float minNorm = scalar_mult(simplex[0], simplex[0]);
+	int min_ind = 0;
+	for (int i = 0; i < (int)simplex.size(); i++) {
+		float s_prod = scalar_mult(simplex[i], simplex[i]);
+		if (minNorm > s_prod) { minNorm = s_prod; min_ind = i; }
+	}
+	pt = simplex[min_ind];
+}
+
+typedef struct {
+	std::vector<std::vector<GLfloat>> simplex;
+	int simplexSize;
+	std::vector<std::vector<std::vector<GLfloat>>> convexHullPoints;
+	std::vector<GLfloat> minNormPoint;
+	
+}convexHull;
+
+void createLine(std::vector<GLfloat>& i_p, std::vector<GLfloat>& e_p, std::vector<std::vector<GLfloat>>& line) {
+	GLfloat step = 0.1;
+	std::vector<GLfloat> pt = i_p;
+
+	std::vector<GLfloat> v = e_p;
+	subtr_3Dvectors(v, i_p);
+	scale_3Dvectors(v, step);
+
+	std::vector<std::vector<GLfloat>> tmp_CHP;
+	tmp_CHP.push_back(pt);
+
+	float dl = dist_sq_vec(i_p, e_p);
+	float dpt = dist_sq_vec(i_p, pt);
+
+	float diff = dl - dpt;
+	while (diff > 0) {
+		add_3Dvectors(pt, v);
+		tmp_CHP.push_back(pt);
+
+		dpt = dist_sq_vec(i_p, pt);
+		diff = dl - dpt;
+	}
+	tmp_CHP.push_back(e_p);
+	line = tmp_CHP;
+}
+
+// take each point from each line and take the average to fill "the void"
+void fillAreaBetweenLines(std::vector<std::vector<GLfloat>>& l1,
+	std::vector<std::vector<GLfloat>>& l2,
+	std::vector<std::vector<GLfloat>>& l3,
+	std::vector<std::vector<GLfloat>>& A) {
+
+	std::vector<std::vector<GLfloat>> tmp;
+
+	for (int i1 = 0; i1 < (int)l1.size(); i1++) {
+		for (int i2 = 0; i2 < (int)l2.size(); i2++) {
+			for (int i3 = 0; i3 < (int)l3.size(); i3++) {
+				std::vector<GLfloat> avg1 = l1[i1];
+				std::vector<GLfloat> avg2 = l2[i2];
+				std::vector<GLfloat> avg3 = l3[i3];
+
+				std::vector<GLfloat> o1, o2;
+				std::vector<GLfloat> o3, o4;
+				std::vector<GLfloat> o5, o6;
+
+				add_toCont3Dvecs(avg1, avg2, o1);
+				add_toCont3Dvecs(avg1, avg3, o2);
+				add_toCont3Dvecs(avg2, avg1, o3);
+				add_toCont3Dvecs(avg2, avg3, o4);
+				add_toCont3Dvecs(avg3, avg1, o5);
+				add_toCont3Dvecs(avg3, avg2, o6);
+
+				tmp.push_back(o1);
+				tmp.push_back(o2);
+				tmp.push_back(o3);
+				tmp.push_back(o4);
+				tmp.push_back(o5);
+				tmp.push_back(o6);
+			}
 		}
 	}
-	else if ((hit_box1 == BOUNDING_BOX && hit_box2 == BOUNDING_SPHERE) ||
-		(hit_box2 == BOUNDING_BOX && hit_box1 == BOUNDING_SPHERE)) {
-		if (col_obj.detect_BOX_SPHERE(hitMesh1, hitMesh2)) {
-			rigid1->collided = true;
-			rigid2->collided = true;
-			std::vector<GLfloat> col_pt;
-			check_approx_coll(rigid1, rigid2, col_pt);
-			rigid1->collisionPosition = col_pt;
-			rigid2->collisionPosition = col_pt;
+	A = tmp;
+}
+
+void create_ConvexLine(convexHull* convHull) {
+	assert(convHull->simplexSize == 2);
+	std::vector<GLfloat> init_pt = convHull->simplex[0];
+	std::vector<GLfloat> e_p = convHull->simplex[1];
+
+	std::vector<std::vector<GLfloat>> tmp_CHP;
+	createLine(init_pt, e_p, tmp_CHP);
+	std::vector<std::vector<std::vector<GLfloat>>> CHP;
+	CHP.push_back(tmp_CHP);
+	convHull->convexHullPoints = CHP;
+}
+
+void createTriangle(std::vector<GLfloat>& i1,
+	std::vector<GLfloat>& e1,
+	std::vector<GLfloat>& i2,
+	std::vector<GLfloat>& e2,
+	std::vector<GLfloat>& i3,
+	std::vector<GLfloat>& e3,
+	std::vector<std::vector<std::vector<GLfloat>>>& tmp) {
+
+	std::vector<std::vector<GLfloat>> tmp1;
+	std::vector<std::vector<GLfloat>> tmp2;
+	std::vector<std::vector<GLfloat>> tmp3;
+	std::vector<std::vector<GLfloat>> A;
+	createLine(i1, e1, tmp1);
+	createLine(i2, e2, tmp2);
+	createLine(i3, e3, tmp3);
+	fillAreaBetweenLines(tmp1, tmp2, tmp3, A);
+
+	std::vector<std::vector<std::vector<GLfloat>>> tmpTriangle;
+	tmpTriangle.push_back(tmp1);
+	tmpTriangle.push_back(tmp2);
+	tmpTriangle.push_back(tmp3);
+	tmpTriangle.push_back(A);
+
+	tmp = tmpTriangle;
+}
+
+void create_ConvexTriangle(convexHull* convHull) {
+	std::vector<GLfloat> i_p1 = convHull->simplex[0];
+	std::vector<GLfloat> e_p1 = convHull->simplex[1];
+	std::vector<GLfloat> i_p2 = e_p1;
+	std::vector<GLfloat> e_p2 = convHull->simplex[2];
+	std::vector<GLfloat> i_p3 = e_p2;
+	std::vector<GLfloat> e_p3 = i_p1;
+
+	std::vector<std::vector<std::vector<GLfloat>>> tmp;
+	createTriangle(i_p1, e_p1, i_p2, e_p2, i_p3, e_p3, tmp);
+	convHull->convexHullPoints = tmp;
+}
+
+void create_ConvexTetrahedron(convexHull* convHull) {
+
+	// 4 faces == 4 triangles to create
+	// map the points as 1,2,3,4 <-> 0,1,2,3
+	// triangle [1] : 1->2->3
+	std::vector<GLfloat> i11 = convHull->simplex[0]; // 1->2
+	std::vector<GLfloat> e11 = convHull->simplex[1];
+	std::vector<GLfloat> i21 = convHull->simplex[1]; // 2->3
+	std::vector<GLfloat> e21 = convHull->simplex[2];
+	std::vector<GLfloat> i31 = convHull->simplex[2]; // 3->1
+	std::vector<GLfloat> e31 = convHull->simplex[0];
+	std::vector<std::vector<std::vector<GLfloat>>> tmp1;
+	createTriangle(i11, e11, i21, e21, i31, e31, tmp1);
+
+	//triangle [2] : 1->3->4
+	std::vector<GLfloat> i12 = convHull->simplex[0]; // 1->3
+	std::vector<GLfloat> e12 = convHull->simplex[2]; 
+	std::vector<GLfloat> i22 = convHull->simplex[2]; // 3->4
+	std::vector<GLfloat> e22 = convHull->simplex[3];
+	std::vector<GLfloat> i32 = convHull->simplex[3]; // 4->1
+	std::vector<GLfloat> e32 = convHull->simplex[0];
+	std::vector<std::vector<std::vector<GLfloat>>> tmp2;
+	createTriangle(i12, e12, i22, e22, i32, e32, tmp2);
+
+	// triangle [3] : 1->2->4
+	std::vector<GLfloat> i13 = convHull->simplex[0]; // 1->2
+	std::vector<GLfloat> e13 = convHull->simplex[1]; 
+	std::vector<GLfloat> i23 = convHull->simplex[1]; // 2->4
+	std::vector<GLfloat> e23 = convHull->simplex[3]; 
+	std::vector<GLfloat> i33 = convHull->simplex[3]; // 4->1
+	std::vector<GLfloat> e33 = convHull->simplex[0];
+	std::vector<std::vector<std::vector<GLfloat>>> tmp3;
+	createTriangle(i13, e13, i23, e23, i33, e33, tmp3);
+	
+	// triangle [4] : 2->3->4
+	std::vector<GLfloat> i14 = convHull->simplex[1]; // 2->3
+	std::vector<GLfloat> e14 = convHull->simplex[2];
+	std::vector<GLfloat> i24 = convHull->simplex[2]; // 3->4
+	std::vector<GLfloat> e24 = convHull->simplex[3];
+	std::vector<GLfloat> i34 = convHull->simplex[3]; // 4->2
+	std::vector<GLfloat> e34 = convHull->simplex[1];
+	std::vector<std::vector<std::vector<GLfloat>>> tmp4;
+	createTriangle(i14, e14, i24, e24, i34, e34, tmp4);
+
+	std::vector<std::vector<std::vector<GLfloat>>> tmp;
+	tmp.reserve(tmp1.size() + tmp2.size() + tmp3.size() + tmp4.size());
+	tmp.insert(tmp.end(), tmp1.begin(), tmp1.end());
+	tmp.insert(tmp.end(), tmp2.begin(), tmp2.end());
+	tmp.insert(tmp.end(), tmp3.begin(), tmp3.end());
+	tmp.insert(tmp.end(), tmp4.begin(), tmp4.end());
+
+	convHull->convexHullPoints = tmp;
+}
+
+void createConvexHull(convexHull* convHull) {
+
+	int s_z = convHull->simplexSize;
+	if (s_z == 2) {
+		// line
+		create_ConvexLine(convHull);
+	}
+	else if (s_z == 3) {
+		//triangle
+		create_ConvexTriangle(convHull);
+	}
+	else if (s_z == 4) {
+		//tetrahedron
+		create_ConvexTetrahedron(convHull);
+	}
+}
+
+// pt = minimumNorm(ConvexHull(Q U {V})) = argmin{<a,a>|for a in ConvexHull}
+// iterates on all lines contained in the convex hull to find from all minimum points
+// the global point.
+void GJK_MinimumNormConvexHull(convexHull* convHull, std::vector<GLfloat>& p, int l) {
+
+	std::vector<std::vector<std::vector<GLfloat>>> conv = convHull->convexHullPoints;
+	std::vector<GLfloat> tmp = conv[0][0];
+	for (int i = 0; i < (int)conv.size(); i++) {
+		std::vector<GLfloat> lp;
+		GJK_MinimumNormLine(conv[i], lp);
+		if (scalar_mult(lp, lp) < scalar_mult(tmp, tmp)) {
+			tmp = lp;
+			l = i;
 		}
 	}
-	else if (hit_box1 == BOUNDING_SPHERE && hit_box2 == BOUNDING_SPHERE) {
-		if (col_obj.detect_SPHERE_SPHERE(hitMesh1, hitMesh2)) {
-			rigid1->collided = true;
-			rigid2->collided = true;
-			std::vector<GLfloat> col_pt;
-			check_approx_coll(rigid1, rigid2, col_pt);
-			rigid1->collisionPosition = col_pt;
-			rigid2->collisionPosition = col_pt;
+	p = tmp;
+}
+
+void GJK_add_vec_toSimplex(convexHull* convHull, std::vector<GLfloat>& v) {
+	std::vector<std::vector<GLfloat>> tmp = convHull->simplex;
+	tmp.push_back(v);
+	convHull->simplex = tmp;
+	convHull->simplexSize = (int)tmp.size();
+	assert(convHull->simplexSize <= 4);
+	createConvexHull(convHull);
+}
+
+bool cmpr_vecs(std::vector<GLfloat>& v1, std::vector<GLfloat>& v2) {
+	if ((v1[0] == v2[0]) && (v1[1] == v2[1]) && (v1[2] == v2[2])) {
+		return true;
+	}
+	return false;
+}
+
+bool check_0_simplex(convexHull* convHull,
+	std::vector<std::vector<std::vector<GLfloat>>>& conv,
+	std::vector<GLfloat>& p,
+	int l) {
+
+	int size = (int)conv[l].size();
+	int simplex_size = convHull->simplexSize;
+
+	bool r = true;
+
+	std::vector<std::vector<GLfloat>> osimplex;
+	if (l > 0 && l < (int)conv.size() - 1) {
+		if ((cmpr_vecs(p, conv[l][size - 1]) && cmpr_vecs(p, conv[l + 1][0])) ||
+			(cmpr_vecs(p, conv[l][0]) && cmpr_vecs(p, conv[l - 1][size - 1]))) {
+			osimplex.push_back(p);
+			convHull->simplex = osimplex;
+			convHull->simplexSize = 1;
 		}
 	}
-	else if ((hit_box1 == BOUNDING_CONVEX && hit_box2 == BOUNDING_CONVEX) ||
-		(hit_box1 == BOUNDING_CONVEX && hit_box2 == BOUNDING_BOX) ||
-		(hit_box2 == BOUNDING_CONVEX && hit_box1 == BOUNDING_BOX) || 
-		(hit_box1 == BOUNDING_CONVEX && hit_box2 == BOUNDING_SPHERE) || 
-		(hit_box2 == BOUNDING_CONVEX && hit_box1 == BOUNDING_SPHERE) || 
-		(hit_box1 == SUB_MESH && hit_box2 == SUB_MESH) || 
-		(hit_box1 == SUB_MESH && hit_box2 == BOUNDING_CONVEX) || 
-		(hit_box2 == SUB_MESH && hit_box1 == BOUNDING_CONVEX)) {
-		if (col_obj.detect_CONVEX_CONVEX_or_SPHERE(hitMesh1, hitMesh2)) {
-			rigid1->collided = true;
-			rigid2->collided = true;
-			std::vector<GLfloat> col_pt;
-			check_approx_coll(rigid1, rigid2, col_pt);
-			rigid1->collisionPosition = col_pt;
-			rigid2->collisionPosition = col_pt;
+	else if (l == 0) {
+		if (cmpr_vecs(p, conv[l][0]) || cmpr_vecs(p, conv[l][size - 1])) {
+			osimplex.push_back(p);
+			convHull->simplex = osimplex;
+			convHull->simplexSize = 1;
 		}
 	}
-	else if ((hit_box1 == SUB_MESH && hit_box2 == BOUNDING_BOX) || 
-		(hit_box2 == SUB_MESH && hit_box1 == BOUNDING_BOX) || 
-		(hit_box1 == SUB_MESH && hit_box2 == BOUNDING_SPHERE) || 
-		(hit_box2 == SUB_MESH && hit_box1 == BOUNDING_SPHERE)) {
-		if (col_obj.detect_CONVEX_CONVEX_or_SPHERE(hitMesh1, hitMesh2)) {
-			rigid1->collided = true;
-			rigid2->collided = true;
-			std::vector<GLfloat> col_pt;
-			check_approx_coll(rigid1, rigid2, col_pt);
-			rigid1->collisionPosition = col_pt;
-			rigid2->collisionPosition = col_pt;
+	else if (l == (int)conv.size() - 1) {
+		if (simplex_size == 2) {
+			osimplex.push_back(p);
+			convHull->simplex = osimplex;
+			convHull->simplexSize = 1;
 		}
 	}
+	else {
+		r = false;
+	}
+	return r;
+
+}
+
+bool check_1_simplex(convexHull* convHull,
+	std::vector<std::vector<std::vector<GLfloat>>>& conv,
+	std::vector<GLfloat>& p,
+	int l) {
+
+	int sz = convHull->simplexSize;
+	int size = (int)conv[l].size();
+	std::vector<std::vector<GLfloat>> oneSimplex;
+	bool r = false;
+
+	if (sz == 2) { r = true; }
+	else if (sz == 3) {
+		if (l < size - 1) { r = true; }
+	}
+	else if (sz == 4) {
+		if ((l + 1) % 4 != 0) { r = true; }
+	}
+	else { r = false; }
+
+	if (r) {
+		oneSimplex.push_back(conv[l][0]);
+		oneSimplex.push_back(conv[l][size - 1]);
+		convHull->simplex = oneSimplex;
+		convHull->simplexSize = 2;
+	}
+	return r;
+}
+
+bool check_2_simplex(convexHull* convHull,
+	std::vector<std::vector<std::vector<GLfloat>>>& conv,
+	std::vector<GLfloat>& p,
+	int l) {
+
+	int sz = convHull->simplexSize;
+	int size = (int)conv[l].size();
+	std::vector<std::vector<GLfloat>> twoSimplex;
+	bool r = false;
+
+	if (sz < 3) {
+		r = false;
+	}
+	else if (sz == 3) {
+		if (l == size - 1) { r = true; }
+	}
+	else if (sz == 4) {
+		if ((l + 1) % 4 == 0) { r = true; }
+	}
+	else { r = false; }
+
+	if (r) {
+		twoSimplex.push_back(conv[l - 3][0]);
+		twoSimplex.push_back(conv[l - 2][0]);
+		twoSimplex.push_back(conv[l - 1][0]);
+		convHull->simplex = twoSimplex;
+		convHull->simplexSize = 3;
+	}
+	return r;
+}
+
+// Q <- Q' C Q U {v} && P in Q' && |Q'| = min{|W| | W C Q U {v}}
+bool GJK_add_vec_optimizeSimplex(convexHull* convHull, std::vector<GLfloat>& v) {
+
+	// for finding the closest point to origin
+	int area;
+	std::vector<GLfloat> p;
+	std::vector<std::vector<std::vector<GLfloat>>> conv = convHull->convexHullPoints;
+
+	GJK_add_vec_toSimplex(convHull, v);
+	GJK_MinimumNormConvexHull(convHull, p, area);
+
+	convHull->minNormPoint = p;
+	// a case that p is in the vertices of the convex Hull - on the CSO
+	// this is the 0-simplex case because the simplest convex subset of the
+	// simplex that containes p is p itself.
+	if (check_0_simplex(convHull, conv, p, area)) {
+		return true;
+	}
+
+	// this is the 1-simplex case - when the minimum convex subset of Q that
+	// containes p is a line between two points on the CSO
+	else if (check_1_simplex(convHull, conv, p, area)) {
+		return true;
+	}
+
+	// this is the 2-simplex case - when the minimum convex subset of Q that
+	// contains p is a triangle - happens when p is inside the triangle
+	// happens probably more with 3-simplexes that can be reduced to 2-simplex
+	else if (check_2_simplex(convHull, conv, p, area)) {
+		return true;
+	}
+	return false;
+}
+
+void GJK_main(std::vector<std::vector<GLfloat>>& CSO, convexHull* convHull, std::vector<GLfloat>& cp) {
+
+	std::vector<GLfloat> p = CSO[0];
+
+	std::vector<std::vector<GLfloat>> tmp_simplex;
+	tmp_simplex.push_back(p);
+	convHull->simplex = tmp_simplex;
+
+	std::vector<GLfloat> v;
+	GJK_shortest_dst_pt(CSO, p, v);
+
+	while (scalar_mult(p, p) - scalar_mult(p, v) > GJK_EPSILON * GJK_EPSILON) {
+		bool opt = GJK_add_vec_optimizeSimplex(convHull, v);
+		if(!opt){ throw std::runtime_error(" something went wrong..."); }
+		p = convHull->minNormPoint;
+		GJK_shortest_dst_pt(CSO, p, v);
+	}
+	cp = p;
+}
+
+void GJK(Rigid_body* rigid1, Rigid_body* rigid2, convexHull* convHull, std::vector<GLfloat>& cp) {
+
+	std::vector<std::vector<GLfloat>> CSO;
+	GJK_minkowski_diff(rigid1, rigid2, CSO);
+	GJK_main(CSO, convHull, cp);
 }

@@ -90,6 +90,24 @@ void rotate_vec_along_axis(std::vector<GLfloat>& v, GLfloat rot_angle, std::vect
 float approx_dist_vec(std::vector<GLfloat>& v);
 void angular_position_update(Rigid_body* rigid, float time_stamp);
 void apply_force_update_position(Rigid_body* rigid, std::vector<GLfloat>& init_force_pt, std::vector<GLfloat>& force, float time_stamp);
-void check_approx_coll(Rigid_body* rigid1, Rigid_body* rigid2, std::vector<GLfloat>& col_pt);
-void approx_collision_point(Rigid_body* rigid1, Rigid_body* rigid2);
+void subtr_3Dvectors(std::vector<GLfloat>& v_r, std::vector<GLfloat>& v_a);
+void GJK_minkowski_diff(Rigid_body* rigid1, Rigid_body* rigid2, std::vector<std::vector<GLfloat>>& res);
+void GJK_shortest_dst_pt(std::vector<std::vector<GLfloat>>& mink_diff, std::vector<GLfloat>& axis, std::vector<GLfloat>& pt);
+void GJK_MinimumNormLine(std::vector<std::vector<GLfloat>>& simplex, std::vector<GLfloat>& pt);
+typedef struct convexHull;
+void createLine(std::vector<GLfloat>& i_p, std::vector<GLfloat>& e_p, std::vector<std::vector<GLfloat>>& line);
+void create_ConvexLine(convexHull* convHull);
+void createTriangle(std::vector<GLfloat>& i1, std::vector<GLfloat>& e1, std::vector<GLfloat>& i2, std::vector<GLfloat>& e2, std::vector<GLfloat>& i3, std::vector<GLfloat>& e3, std::vector<std::vector<std::vector<GLfloat>>>& tmp);
+void create_ConvexTriangle(convexHull* convHull);
+void create_ConvexTetrahedron(convexHull* convHull);
+void createConvexHull(convexHull* convHull);
+void GJK_MinimumNormConvexHull(convexHull* convHull, std::vector<GLfloat>& p, int l);
+void GJK_add_vec_toSimplex(convexHull* convHull, std::vector<GLfloat>& v);
+bool cmpr_vecs(std::vector<GLfloat>& v1, std::vector<GLfloat>& v2);
+bool check_0_simplex(convexHull* convHull, std::vector<std::vector<std::vector<GLfloat>>>& conv, std::vector<GLfloat>& p, int l);
+bool check_1_simplex(convexHull* convHull, std::vector<std::vector<std::vector<GLfloat>>>& conv, std::vector<GLfloat>& p, int l);
+bool check_2_simplex(convexHull* convHull, std::vector<std::vector<std::vector<GLfloat>>>& conv, std::vector<GLfloat>& p, int l);
+bool GJK_add_vec_optimizeSimplex(convexHull* convHull, std::vector<GLfloat>& v);
+void GJK_main(std::vector<std::vector<GLfloat>>& CSO, convexHull* convHull, std::vector<GLfloat>& cp);
+void GJK(Rigid_body* rigid1, Rigid_body* rigid2, convexHull* convHull, std::vector<GLfloat>& cp);
 #endif
