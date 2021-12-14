@@ -1330,10 +1330,6 @@ void update_position(Rigid_body* rigid, float time_step) {
 	angular_position_update(rigid, time_step);
 }
 
-void apply_continuous_force() {
-
-}
-
 // TODO PLANS: different body types - elastic body (not rigid), fluid simulation, cloth simulation - seperate library
 // TODO PLANS: create forces, collision physics, generate new objects - for rigid body
 // gyroscope and top dynamics should be added
@@ -2033,17 +2029,56 @@ void gravity(Rigid_body* rigid) {
 	rigid->gravityForce = f;
 }
 
-void apply_gravity(Rigid_body* rigid) {
+void distrib_gravity(Rigid_body* rigid) {
 
-	// generating the force
+	// generating the force - TODO fix : to decompose the force into radial and tangent components
 	gravity(rigid);
-	std::vector<std::vector<GLfloat>> force_distrib;
-	force_distrib = rigid->Force_distrib_radial;
-	rigid->gravityApplied = true;
+	std::vector<std::vector<GLfloat>> force_distrib1;
+	std::vector<std::vector<GLfloat>> force_distrib2;
+	force_distrib1 = rigid->Force_distrib_radial;
+	force_distrib2 = rigid->Force_distrib_tangent;
 	int i = 0;
-	while (i < (int)force_distrib.size()) {
-		add_3Dvectors(force_distrib[i], rigid->gravityForce);
+	while (i < (int)force_distrib1.size()) {
+		add_3Dvectors(force_distrib1[i], rigid->gravityForce);
 	}
-	rigid->Force_distrib_radial = force_distrib;
+
+	int j = 0;
+	while (j < (int)force_distrib2.size()) {
+		add_3Dvectors(force_distrib2[i], rigid->gravityForce);
+	}
+
+	rigid->Force_distrib_radial = force_distrib1;
+	rigid->Force_distrib_tangent = force_distrib2;
 }
+
+// gravity is a continous force - if not manually done, the gravity does not disappear
+// as default - gravity is on.
+void apply_gravity(bool apply, Rigid_body* rigid, float time) {
+	if (apply) {
+		rigid->gravityApplied = true;
+		distrib_gravity(rigid);
+		update_position(rigid, time);
+	}
+	else {
+		// remove force
+	}
+}
+
 /*----------------------full time pipeline - putting all the peices together through time---------------------*/
+// the pipeline:
+/*
+initial state <- 0,0,0...
+while time is running:
+	if bodies are added:
+		initial state <- bodies
+	end
+	body1,2,...,n <- gravity
+	if n > 1 and collided(bodym , bodyk) m, k in {1,2,...,n}:
+		bodym <- force, boyk <- -force
+	end
+	if added force:
+		calculate position change
+		update position on screen
+	end
+end
+*/

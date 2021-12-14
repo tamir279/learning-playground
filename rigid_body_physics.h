@@ -92,6 +92,8 @@ void rotate_vec_along_axis(std::vector<GLfloat>& v, GLfloat rot_angle, std::vect
 float approx_dist_vec(std::vector<GLfloat>& v);
 void angular_position_update(Rigid_body* rigid, float time_stamp);
 void apply_force_update_position(Rigid_body* rigid, std::vector<GLfloat>& init_force_pt, std::vector<GLfloat>& force, float time_stamp);
+void apply_continous_force(Rigid_body* rigid, std::vector<GLfloat>& init_force_pt, std::vector<std::vector<GLfloat>>& force_t, float time_steps);
+void update_position(Rigid_body* rigid, float time_step);
 void subtr_3Dvectors(std::vector<GLfloat>& v_r, std::vector<GLfloat>& v_a);
 void GJK_minkowski_diff(Rigid_body* rigid1, Rigid_body* rigid2, std::vector<std::vector<GLfloat>>& res);
 void GJK_shortest_dst_pt(std::vector<std::vector<GLfloat>>& mink_diff, std::vector<GLfloat>& axis, std::vector<GLfloat>& pt);
@@ -119,7 +121,7 @@ float approx_E(Rigid_body* rigid1, Rigid_body* rigid2);
 std::vector<GLfloat> calc_collision_force(Rigid_body* rigid1, Rigid_body* rigid2);
 std::vector<GLfloat> newton_3rd_law(std::vector<GLfloat>& F1);
 void gravity(Rigid_body* rigid);
-void apply_gravity(Rigid_body* rigid);
+void distrib_gravity(Rigid_body* rigid);
 
 // simulating over time
 
