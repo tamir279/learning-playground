@@ -26,6 +26,8 @@
 #define QUAD_POL 4
 
 #define GJK_EPSILON 1.19209290E-02F
+#define IMPACT_CRITICAL_VELOCITY 5.0F
+#define G 9.81F
 
 void translate_vertices_LEGACY_GL(std::vector<std::vector<std::vector<GLfloat>>>& vertices_per_object,
 	std::vector<std::vector<GLfloat>>& vertex_vec) {
@@ -674,6 +676,7 @@ typedef struct {
 	std::vector<std::vector<GLfloat>> collisionForces;
 	std::vector<std::vector<GLfloat>> Force_distrib_radial;
 	std::vector<std::vector<GLfloat>> Force_distrib_tangent;
+	std::vector<std::vector<GLfloat>> curr_ShortForce_distrib;
 	std::vector<GLfloat> torque;
 	std::vector<GLfloat> staticFriction_Force;
 	std::vector<GLfloat> kineticFriction_Force;
@@ -937,31 +940,41 @@ void distrib_force_to_polygon(std::vector<GLfloat>& force,
 
 }
 
-void distrib_force_to_mass_elems(Rigid_body* rigidBody,
-	std::vector<GLfloat>& init_force_pt,
-	std::vector<GLfloat>& force,
-	std::vector<std::vector<GLfloat>>& force_distrib) {
+void find_init_pt_onBody(Rigid_body* rigidBody, std::vector<GLfloat>& init_force_pt, int& min_poly, int& closest) {
 
 	std::vector<std::vector<GLfloat>> body = rigidBody->bodyPos;
 	std::vector<int> poly = rigidBody->body_polygon_size;
 	int j = 0;
 	int lim = poly[0];
 	float min_dist_sq = dist_sq_vec(init_force_pt, body[0]);
-	int min_poly = 0;
-	int closest = 0;
 
+	int m = 0;
+	int c = 0;
 	for (int i = 0; i < (int)poly.size(); i++) {
 		while (j < lim) {
 			float sq_dist = dist_sq_vec(init_force_pt, body[j]);
 			if (sq_dist < min_dist_sq) {
 				min_dist_sq = sq_dist;
-				min_poly = i;
-				closest = j;
+				m = i;
+				c = j;
 			}
 			j++;
 		}
 		if (i < (int)poly.size() - 1) { lim += poly[i + 1]; }
 	}
+
+	min_poly = m;
+	closest = c;
+}
+
+void distrib_force_to_mass_elems(Rigid_body* rigidBody,
+	std::vector<GLfloat>& init_force_pt,
+	std::vector<GLfloat>& force,
+	std::vector<std::vector<GLfloat>>& force_distrib) {
+
+	int min_poly = 0;
+	int closest = 0;
+	find_init_pt_onBody(rigidBody, init_force_pt, min_poly, closest);
 	distrib_force_to_polygon(force, rigidBody, min_poly, closest, force_distrib);
 }
 
@@ -1012,7 +1025,9 @@ void create_force_axis(Rigid_body* rigidBody,
 void radial_tangent_decomposition(Rigid_body* rigidBody,
 	std::vector<GLfloat>& init_force_pt,
 	std::vector<GLfloat>& force,
-	std::vector<std::vector<GLfloat>>& force_distrib) {
+	std::vector<std::vector<GLfloat>>& force_distrib,
+	std::vector<std::vector<GLfloat>>& r,
+	std::vector<std::vector<GLfloat>>& t) {
 
 	// size(force_distribution) == size(rad_f_dist) == size(tan_f_dist) == size(bodyPos)
 	std::vector<std::vector<GLfloat>> rad_f = rigidBody->Force_distrib_radial;
@@ -1025,12 +1040,12 @@ void radial_tangent_decomposition(Rigid_body* rigidBody,
 		add_3Dvectors(rad_f[i], c_m_axis);
 		add_3Dvectors(tan_f[i], tan_axis);
 	}
-	rigidBody->Force_distrib_radial = rad_f;
-	rigidBody->Force_distrib_tangent = tan_f;
+	r = rad_f;
+	t = tan_f;
 }
 
 // force at center mass - average radial force
-void average_radial_force(Rigid_body* rigidBody) {
+void average_radial_force(Rigid_body* rigidBody, std::vector<std::vector<GLfloat>>& avg_r) {
 	std::vector<GLfloat> avg_rad_force = { 0, 0, 0 };
 	std::vector<std::vector<GLfloat>> avg_rad_dist;
 	std::vector<std::vector<GLfloat>> rad_distrib = rigidBody->Force_distrib_radial;
@@ -1045,15 +1060,60 @@ void average_radial_force(Rigid_body* rigidBody) {
 		avg_rad_dist.push_back(avg_rad_force);
 		i++;
 	}
-	rigidBody->Force_distrib_radial = avg_rad_dist;
+	avg_r = avg_rad_dist;
 }
 
 // distributes the force, and divides into radial force and tangent force
 void apply_force(Rigid_body* rigidBody, std::vector<GLfloat>& init_force_pt, std::vector<GLfloat>& force) {
 	std::vector<std::vector<GLfloat>> force_distrib;
+	std::vector<std::vector<GLfloat>> rad;
+	std::vector<std::vector<GLfloat>> tang;
 	distrib_force_to_mass_elems(rigidBody, init_force_pt, force, force_distrib);
-	radial_tangent_decomposition(rigidBody, init_force_pt, force, force_distrib);
-	average_radial_force(rigidBody);
+	rigidBody->curr_ShortForce_distrib = force_distrib;
+
+	radial_tangent_decomposition(rigidBody, init_force_pt, force, force_distrib, rad, tang);
+	rigidBody->Force_distrib_radial = rad;
+
+	average_radial_force(rigidBody, rad);
+	rigidBody->Force_distrib_radial = rad; 
+	rigidBody->Force_distrib_tangent = tang;
+}
+
+// removes the force when the force stoppes being applied to the body
+void remove_force(Rigid_body* rigidBody,
+	std::vector<GLfloat>& init_force_pt,
+	std::vector<GLfloat>& force) {
+
+	std::vector<std::vector<GLfloat>> force_distrib = rigidBody->curr_ShortForce_distrib;
+	std::vector<std::vector<GLfloat>> r = rigidBody->Force_distrib_radial;
+	std::vector<std::vector<GLfloat>> t = rigidBody->Force_distrib_tangent;
+
+	std::vector<std::vector<GLfloat>> rad;
+	std::vector<GLfloat> avg_r = { 0, 0, 0 };
+	std::vector<std::vector<GLfloat>> tang;
+	radial_tangent_decomposition(rigidBody, init_force_pt, force, force_distrib, rad, tang);
+	
+	// recovering average radial
+	int i = 0;
+	while (i < (int)rad.size()) {
+		add_3Dvectors(avg_r, rad[i]);
+	}
+	scale_3Dvectors(avg_r, (int)rad.size());
+
+	// removing from radial distribution
+	int i1 = 0;
+	while (i1 < (int)r.size()) {
+		subtr_3Dvectors(r[i1], avg_r);
+	}
+
+	// removing from the tangent force distribution
+	int i2 = 0;
+	while (i2 < (int)t.size()) {
+		subtr_3Dvectors(t[i2], tang[i2]);
+	}
+
+	rigidBody->Force_distrib_radial = r;
+	rigidBody->Force_distrib_tangent = t;
 }
 
 // convert forces into aacelerations and velocities
@@ -1231,6 +1291,7 @@ void angular_position_update(Rigid_body* rigid, float time_stamp){
 	rigid->hitBoxPos = temp_Hpos;
 }
 
+// for immidiate force - time_stamp = 1;
 void apply_force_update_position(Rigid_body* rigid,
 	std::vector<GLfloat>& init_force_pt,
 	std::vector<GLfloat>& force,
@@ -1245,11 +1306,39 @@ void apply_force_update_position(Rigid_body* rigid,
 	angular_position_update(rigid, time_stamp);
 }
 
+void apply_continous_force(Rigid_body* rigid,
+	std::vector<GLfloat>& init_force_pt,
+	std::vector<std::vector<GLfloat>>& force_t,
+	float time_steps) {
+
+	int i = 0;
+	while (i < time_steps) {
+		apply_force_update_position(rigid, init_force_pt, force_t[i], 1);
+		remove_force(rigid, init_force_pt, force_t[i]);
+	}
+}
+
+// without forces / continous ones
+void update_position(Rigid_body* rigid, float time_step) {
+
+	//remove_force(rigidBo)
+	newton_linear_second_law(rigid, time_step);
+	calc_torque(rigid);
+	calc_angularAcceleration(rigid);
+	calc_angularVelocity_from_acc(rigid, time_step);
+	linear_position_update(rigid, time_step);
+	angular_position_update(rigid, time_step);
+}
+
+void apply_continuous_force() {
+
+}
+
 // TODO PLANS: different body types - elastic body (not rigid), fluid simulation, cloth simulation - seperate library
 // TODO PLANS: create forces, collision physics, generate new objects - for rigid body
 // gyroscope and top dynamics should be added
 
-/*----------------------------collision physics - simulate a force on a rigid body------------------------------*/
+/*----------------------------collision physics - simulate collision forces on rigid bodies------------------------------*/
 
 // written like that for speed...
 void subtr_3Dvectors(std::vector<GLfloat>& v_r, std::vector<GLfloat>& v_a) {
@@ -1267,8 +1356,8 @@ void add_toCont3Dvecs(std::vector<GLfloat>& a, std::vector<GLfloat>& b, std::vec
 // GJK algorithm for detecting collisions and finding the point of collision
 void GJK_minkowski_diff(Rigid_body* rigid1, Rigid_body* rigid2, std::vector<std::vector<GLfloat>>& res) {
 
-	std::vector<std::vector<GLfloat>> mesh1 = rigid1->bodyPos;
-	std::vector<std::vector<GLfloat>> mesh2 = rigid2->bodyPos;
+	std::vector<std::vector<GLfloat>> mesh1 = rigid1->hitBoxPos;
+	std::vector<std::vector<GLfloat>> mesh2 = rigid2->hitBoxPos;
 	std::vector<std::vector<GLfloat>> tmp_res;
 
 	int i = 0;
@@ -1510,7 +1599,7 @@ void createConvexHull(convexHull* convHull) {
 // pt = minimumNorm(ConvexHull(Q U {V})) = argmin{<a,a>|for a in ConvexHull}
 // iterates on all lines contained in the convex hull to find from all minimum points
 // the global point.
-void GJK_MinimumNormConvexHull(convexHull* convHull, std::vector<GLfloat>& p, int l) {
+void GJK_MinimumNormConvexHull(convexHull* convHull, std::vector<GLfloat>& p, int& l) {
 
 	std::vector<std::vector<std::vector<GLfloat>>> conv = convHull->convexHullPoints;
 	std::vector<GLfloat> tmp = conv[0][0];
@@ -1700,3 +1789,261 @@ void GJK(Rigid_body* rigid1, Rigid_body* rigid2, convexHull* convHull, std::vect
 	GJK_minkowski_diff(rigid1, rigid2, CSO);
 	GJK_main(CSO, convHull, cp);
 }
+
+bool recoverPoinTofCollision(Rigid_body* rigid1, Rigid_body* rigid2, std::vector<GLfloat>& p , std::vector<GLfloat>& res) {
+
+	std::vector<std::vector<GLfloat>> mesh1 = rigid1->hitBoxPos;
+	std::vector<std::vector<GLfloat>> mesh2 = rigid2->hitBoxPos;
+	for (int i1 = 0; i1 < (int)mesh1.size(); i1++) {
+		for (int i2 = 0; i2 < (int)mesh2.size(); i2++) {
+			std::vector<GLfloat> p1 = mesh1[i1];
+			std::vector<GLfloat> p2 = mesh1[i2];
+			subtr_3Dvectors(p1, p2);
+			if (cmpr_vecs(p1, p)) {
+				add_toCont3Dvecs(mesh1[i1], mesh2[i2], res);
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+void detectAndFindCollisionPoint(Rigid_body* rigid1, Rigid_body* rigid2, convexHull* convHull) {
+
+	int hit_box1 = rigid1->hitBoxType;
+	int hit_box2 = rigid2->hitBoxType;
+
+	col_detect col_obj;
+	std::vector<std::vector<GLfloat>> hitMesh1 = rigid1->hitBoxPos;
+	std::vector<std::vector<GLfloat>> hitMesh2 = rigid2->hitBoxPos;
+
+	// collision detected or not
+	bool r = false;
+
+	if (hit_box1 == BOUNDING_BOX && hit_box2 == BOUNDING_BOX) {
+		if (col_obj.detect_BOX_BOX(hitMesh1, hitMesh2)) { r = true; }
+	}
+	else if ((hit_box1 == BOUNDING_BOX && hit_box2 == BOUNDING_SPHERE) ||
+		(hit_box2 == BOUNDING_BOX && hit_box1 == BOUNDING_SPHERE)) {
+		if (col_obj.detect_BOX_SPHERE(hitMesh1, hitMesh2)) { r = true; }
+	}
+	else if (hit_box1 == BOUNDING_SPHERE && hit_box2 == BOUNDING_SPHERE) {
+		if (col_obj.detect_SPHERE_SPHERE(hitMesh1, hitMesh2)) { r = true; }
+	}
+	else if ((hit_box1 == BOUNDING_CONVEX && hit_box2 == BOUNDING_CONVEX) ||
+		(hit_box1 == BOUNDING_CONVEX && hit_box2 == BOUNDING_BOX) ||
+		(hit_box2 == BOUNDING_CONVEX && hit_box1 == BOUNDING_BOX) ||
+		(hit_box1 == BOUNDING_CONVEX && hit_box2 == BOUNDING_SPHERE) ||
+		(hit_box2 == BOUNDING_CONVEX && hit_box1 == BOUNDING_SPHERE) ||
+		(hit_box1 == SUB_MESH && hit_box2 == SUB_MESH) ||
+		(hit_box1 == SUB_MESH && hit_box2 == BOUNDING_CONVEX) ||
+		(hit_box2 == SUB_MESH && hit_box1 == BOUNDING_CONVEX)) {
+		if (col_obj.detect_CONVEX_CONVEX_or_SPHERE(hitMesh1, hitMesh2)) { r = true; }
+	}
+	else if ((hit_box1 == SUB_MESH && hit_box2 == BOUNDING_BOX) ||
+		(hit_box2 == SUB_MESH && hit_box1 == BOUNDING_BOX) ||
+		(hit_box1 == SUB_MESH && hit_box2 == BOUNDING_SPHERE) ||
+		(hit_box2 == SUB_MESH && hit_box1 == BOUNDING_SPHERE)) {
+		if (col_obj.detect_CONVEX_CONVEX_or_SPHERE(hitMesh1, hitMesh2)) { r = true; }
+	}
+	
+	if (r) {
+		rigid1->collided = true;
+		rigid2->collided = true;
+		std::vector<GLfloat> CSO_pt;
+		std::vector<GLfloat> col_pt;
+		GJK(rigid1, rigid2, convHull, CSO_pt);
+		recoverPoinTofCollision(rigid1, rigid2, CSO_pt, col_pt);
+		rigid1->collisionPosition = col_pt;
+		rigid2->collisionPosition = col_pt;
+	}
+}
+
+void createPolygonNormal(Rigid_body* rigid, std::vector<GLfloat>& init_pt, std::vector<GLfloat>& n, int& c) {
+
+	std::vector<std::vector<GLfloat>> body = rigid->bodyPos;
+	std::vector<int> polpos = rigid->body_polygon_size;
+
+	// project collision point onto the rigid body
+	int minpoly = 0;
+	int closest = 0;
+	find_init_pt_onBody(rigid, init_pt, minpoly, closest);
+
+	// find its polygon
+	int i = 0;
+	int j = 0;
+	while (i < minpoly) {
+		j += polpos[i];
+		i++;
+	}
+
+	// create the normal
+	std::vector<GLfloat> i_vec = body[j];
+	std::vector<GLfloat> e_vec = body[j + polpos[minpoly] - 1];
+	std::vector<GLfloat> mid_vec = body[closest];
+
+	std::vector<GLfloat> p_v1 = e_vec;
+	std::vector<GLfloat> p_v2 = mid_vec;
+	subtr_3Dvectors(p_v1, i_vec);
+	subtr_3Dvectors(p_v2, i_vec);
+
+	std::vector<GLfloat> normal;
+	cross_product(p_v1, p_v2, normal);
+	normalize_vec(normal);
+	n = normal;
+	c = closest;
+}
+
+// based on a loose approximation from the book "contact mechanics" by K L thornton (1987)
+float approx_E(Rigid_body* rigid1, Rigid_body* rigid2) {
+
+	float e;
+	float v1_sq = scalar_mult(rigid1->linearVelocity, rigid1->linearVelocity);
+	float v2_sq = scalar_mult(rigid2->linearVelocity, rigid2->linearVelocity);
+	float maxV_sq = IMPACT_CRITICAL_VELOCITY * IMPACT_CRITICAL_VELOCITY;
+	if (rigid1->linearVelocity > rigid2->linearVelocity) {
+		if (v1_sq < maxV_sq) {
+			e = 1;
+		}
+		else {
+			e = pow((long double)v1_sq, -1 / 8);
+		}
+	}
+	else {
+		if (v2_sq < maxV_sq) {
+			e = 1;
+		}
+		else {
+			e = pow((long double)v2_sq, -1 / 8);
+		}
+	}
+	return e;
+}
+
+// the output is the force vector, but clculating it directly is difficult, so
+// the vector calculated is the impulse infact, and not the actual force.
+// in moment of collision, because the time window between 
+// the initial state of the system to final state is very small, 
+// the force can be approximated with the impulse, as shown:
+/*
+for clearence : (a=) <=> approximately equall, FF' = F
+J = integral[F]_{ti->te}, te = ti + dt , dt -> 0.
+=> J (a=) FF(te)-FF(ti) = FF(ti + dt) - FF(ti) = [(FF(ti + dt) - FF(ti))/dt]dt = f(ti)dt
+																			 dt->0
+fro riemann sum of the inegral we can see the same:
+J (a=) sum_{k = 0 to n} f(t_bk)dt_k , t_bk in [t_k, t_k+1] = f(te)dt/ f(ti)dt
+
+the impulse itself is the difference between final and initial momentum,
+and for short events such as collisions, if we look at the equations of motion:
+
+v(te) = v(ti) + a(te - ti) = v(ti) + F(te - ti)/m = F(te)dt/m = J/m => v(te) = v(ti) + J/m.
+
+so, from the impulse we can derive the force:
+F = J/dt = J/(collision_time).
+
+for calculating J, the formula is:
+e = (v_bf - v_af)/(v_bi - v_ai)
+J = -(1+e)*{[(v_ai - v_bi)*n + (ra x n)*wa - (rb x n)*wb]/[1/ma + 1/mb + (ra x n)*(Ia^-1(ra x n)) + (rb x n)*(Ib^-1(rb x n))]}
+*/
+std::vector<GLfloat> calc_collision_force(Rigid_body* rigid1, Rigid_body* rigid2) {
+
+	// body 1
+	int init_ind1;
+	std::vector<std::vector<GLfloat>> body1 = rigid1->bodyPos;
+	std::vector<GLfloat> col1 = rigid1->collisionPosition;
+	std::vector<GLfloat> n1;
+	createPolygonNormal(rigid1, col1, n1, init_ind1);
+
+	std::vector<GLfloat> r1 = body1[init_ind1];
+	std::vector<GLfloat> c_m1 = rigid1->centerOfMass;
+	subtr_3Dvectors(r1, c_m1);
+
+	GLfloat m1 = rigid1->mass;
+
+	std::vector<GLfloat> v1 = rigid1->linearVelocity;
+	std::vector<GLfloat> w1 = rigid1->angularVelocity;
+	std::vector<std::vector<GLfloat>> I1 = rigid1->inertiaTensor;
+
+
+	// body 2
+	int init_ind2;
+	std::vector<std::vector<GLfloat>> body2 = rigid2->bodyPos;
+	std::vector<GLfloat> col2 = rigid2->collisionPosition;
+	std::vector<GLfloat> n2;
+	createPolygonNormal(rigid2, col2, n2, init_ind2);
+
+	std::vector<GLfloat> r2 = body2[init_ind2];
+	std::vector<GLfloat> c_m2 = rigid2->centerOfMass;
+	subtr_3Dvectors(r2, c_m2);
+
+	GLfloat m2 = rigid2->mass;
+
+	std::vector<GLfloat> v2 = rigid2->linearVelocity;
+	std::vector<GLfloat> w2 = rigid2->angularVelocity;
+	std::vector<std::vector<GLfloat>> I2 = rigid2->inertiaTensor;
+
+
+	// global 
+	float e = approx_E(rigid1, rigid2);
+	float Jtop, Jbottom, J_factor;
+	
+	// calculation - J coeff from v1 - the same force works on both bodies but in opposite directions - 
+	// 3rd law of newton.
+	std::vector<GLfloat> diff = v1;
+	std::vector<GLfloat> c1;
+	std::vector<GLfloat> c2;
+	std::vector<std::vector<GLfloat>> invI1;
+	std::vector<std::vector<GLfloat>> invI2;
+	subtr_3Dvectors(diff, v2);
+	cross_product(r1, n1, c1);
+	cross_product(r2, n1, c2);
+
+	calc_3D_inverse_mat(I1, invI1);
+	calc_3D_inverse_mat(I2, invI2);
+
+	GLfloat* a1 = mult_3D_mat_vec(invI1, c1);
+	GLfloat* a2 = mult_3D_mat_vec(invI2, c2);
+
+	std::vector<GLfloat> ac1(a1, a1 + 3);
+	std::vector<GLfloat> ac2(a2, a2 + 3);
+
+	Jtop = scalar_mult(diff, n1) + scalar_mult(c1, w1) + scalar_mult(c2, w2);
+	Jbottom = 1 / m1 + 1 / m2 + scalar_mult(c1, ac1) + scalar_mult(c2, ac2);
+	J_factor = -(1 + e) * (Jtop / Jbottom);
+
+	std::vector<GLfloat> J1 = n1;
+	scale_3Dvectors(J1, J_factor);
+	// F = J/dt = J/(te - ti) - for the moment of collision - it is the force.
+	return J1;
+}
+
+// in order to calculate the force on the second body - use the 3rd law of newton
+std::vector<GLfloat> newton_3rd_law(std::vector<GLfloat>& F1) {
+	std::vector<GLfloat> F2 = F1;
+	scale_3Dvectors(F2, -1.0);
+	return F2;
+}
+
+void gravity(Rigid_body* rigid) {
+	std::vector<GLfloat> centerMass = rigid->centerOfMass;
+	GLfloat m = rigid->mass;
+	std::vector<GLfloat> f = { 0, 0, -centerMass[2] };
+	normalize_vec(f);
+	scale_3Dvectors(f, m * G);
+	rigid->gravityForce = f;
+}
+
+void apply_gravity(Rigid_body* rigid) {
+
+	// generating the force
+	gravity(rigid);
+	std::vector<std::vector<GLfloat>> force_distrib;
+	force_distrib = rigid->Force_distrib_radial;
+	rigid->gravityApplied = true;
+	int i = 0;
+	while (i < (int)force_distrib.size()) {
+		add_3Dvectors(force_distrib[i], rigid->gravityForce);
+	}
+	rigid->Force_distrib_radial = force_distrib;
+}
+/*----------------------full time pipeline - putting all the peices together through time---------------------*/

@@ -71,13 +71,15 @@ void calc_AngularVelocity_from_InertiaTensor(Rigid_body* rigidBody);
 void init_force(Rigid_body* rigidBody);
 void find_poly_interval(std::vector<int> polygon, int poly, int& min_ind, int& max_ind);
 void distrib_force_to_polygon(std::vector<GLfloat>& force, Rigid_body* rigidBody, int min_poly, int closest_point, std::vector<std::vector<GLfloat>>& force_distrib);
+void find_init_pt_onBody(Rigid_body* rigidBody, std::vector<GLfloat>& init_force_pt, int& min_poly, int& closest);
 void distrib_force_to_mass_elems(Rigid_body* rigidBody, std::vector<GLfloat>& init_force_pt, std::vector<GLfloat>& force, std::vector<std::vector<GLfloat>>& force_distrib);
 GLfloat* create_CenterMass_axis(Rigid_body* rigidBody, std::vector<GLfloat>& init_force_pt, std::vector<GLfloat>& force);
 GLfloat* create_tangent_axis(GLfloat* cm_axis, std::vector<GLfloat>& force);
 void create_force_axis(Rigid_body* rigidBody, std::vector<GLfloat>& init_force_pt, std::vector<GLfloat>& force, std::vector<GLfloat>& center_mass_axis, std::vector<GLfloat>& tangent_axis);
-void radial_tangent_decomposition(Rigid_body* rigidBody, std::vector<GLfloat>& init_force_pt, std::vector<GLfloat>& force, std::vector<std::vector<GLfloat>>& force_distrib);
-void average_radial_force(Rigid_body* rigidBody);
+void radial_tangent_decomposition(Rigid_body* rigidBody, std::vector<GLfloat>& init_force_pt, std::vector<GLfloat>& force, std::vector<std::vector<GLfloat>>& force_distrib, std::vector<std::vector<GLfloat>>& r, std::vector<std::vector<GLfloat>>& t);
+void average_radial_force(Rigid_body* rigidBody, std::vector<std::vector<GLfloat>>& avg_r);
 void apply_force(Rigid_body* rigidBody, std::vector<GLfloat>& init_force_pt, std::vector<GLfloat>& force);
+void remove_force(Rigid_body* rigidBody, std::vector<GLfloat>& init_force_pt, std::vector<GLfloat>& force);
 void newton_linear_second_law(Rigid_body* rigid, float time_stamp);
 void calc_linear_velocity_elems(Rigid_body* rigid, float time_stamp);
 void init_torque(Rigid_body* rigid);
@@ -101,7 +103,7 @@ void createTriangle(std::vector<GLfloat>& i1, std::vector<GLfloat>& e1, std::vec
 void create_ConvexTriangle(convexHull* convHull);
 void create_ConvexTetrahedron(convexHull* convHull);
 void createConvexHull(convexHull* convHull);
-void GJK_MinimumNormConvexHull(convexHull* convHull, std::vector<GLfloat>& p, int l);
+void GJK_MinimumNormConvexHull(convexHull* convHull, std::vector<GLfloat>& p, int& l);
 void GJK_add_vec_toSimplex(convexHull* convHull, std::vector<GLfloat>& v);
 bool cmpr_vecs(std::vector<GLfloat>& v1, std::vector<GLfloat>& v2);
 bool check_0_simplex(convexHull* convHull, std::vector<std::vector<std::vector<GLfloat>>>& conv, std::vector<GLfloat>& p, int l);
@@ -110,4 +112,15 @@ bool check_2_simplex(convexHull* convHull, std::vector<std::vector<std::vector<G
 bool GJK_add_vec_optimizeSimplex(convexHull* convHull, std::vector<GLfloat>& v);
 void GJK_main(std::vector<std::vector<GLfloat>>& CSO, convexHull* convHull, std::vector<GLfloat>& cp);
 void GJK(Rigid_body* rigid1, Rigid_body* rigid2, convexHull* convHull, std::vector<GLfloat>& cp);
+bool recoverPoinTofCollision(Rigid_body* rigid1, Rigid_body* rigid2, std::vector<GLfloat>& p, std::vector<GLfloat>& res);
+void detectAndFindCollisionPoint(Rigid_body* rigid1, Rigid_body* rigid2, convexHull* convHull);
+void createPolygonNormal(Rigid_body* rigid, std::vector<GLfloat>& init_pt, std::vector<GLfloat>& n, int& c);
+float approx_E(Rigid_body* rigid1, Rigid_body* rigid2);
+std::vector<GLfloat> calc_collision_force(Rigid_body* rigid1, Rigid_body* rigid2);
+std::vector<GLfloat> newton_3rd_law(std::vector<GLfloat>& F1);
+void gravity(Rigid_body* rigid);
+void apply_gravity(Rigid_body* rigid);
+
+// simulating over time
+
 #endif
