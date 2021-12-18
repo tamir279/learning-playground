@@ -76,12 +76,13 @@ void distrib_force_to_mass_elems(Rigid_body* rigidBody, std::vector<GLfloat>& in
 GLfloat* create_CenterMass_axis(Rigid_body* rigidBody, std::vector<GLfloat>& init_force_pt, std::vector<GLfloat>& force);
 GLfloat* create_tangent_axis(GLfloat* cm_axis, std::vector<GLfloat>& force);
 void create_force_axis(Rigid_body* rigidBody, std::vector<GLfloat>& init_force_pt, std::vector<GLfloat>& force, std::vector<GLfloat>& center_mass_axis, std::vector<GLfloat>& tangent_axis);
-void radial_tangent_decomposition(Rigid_body* rigidBody, std::vector<GLfloat>& init_force_pt, std::vector<GLfloat>& force, std::vector<std::vector<GLfloat>>& force_distrib, std::vector<std::vector<GLfloat>>& r, std::vector<std::vector<GLfloat>>& t);
+void radial_tangent_decomposition(Rigid_body* rigidBody, std::vector<std::vector<GLfloat>>& force_distrib, std::vector<std::vector<GLfloat>>& r, std::vector<std::vector<GLfloat>>& t);
 void average_radial_force(Rigid_body* rigidBody, std::vector<std::vector<GLfloat>>& avg_r);
 void apply_force(Rigid_body* rigidBody, std::vector<GLfloat>& init_force_pt, std::vector<GLfloat>& force);
 void remove_force(Rigid_body* rigidBody, std::vector<GLfloat>& init_force_pt, std::vector<GLfloat>& force);
 void newton_linear_second_law(Rigid_body* rigid, float time_stamp);
 void calc_linear_velocity_elems(Rigid_body* rigid, float time_stamp);
+void init_VelocityElems(Rigid_body* rigidBody);
 void init_torque(Rigid_body* rigid);
 void calc_torque(Rigid_body* rigid);
 void calc_angularAcceleration(Rigid_body* rigid);
@@ -92,7 +93,7 @@ void rotate_vec_along_axis(std::vector<GLfloat>& v, GLfloat rot_angle, std::vect
 float approx_dist_vec(std::vector<GLfloat>& v);
 void angular_position_update(Rigid_body* rigid, float time_stamp);
 void apply_force_update_position(Rigid_body* rigid, std::vector<GLfloat>& init_force_pt, std::vector<GLfloat>& force, float time_stamp);
-void apply_continous_force(Rigid_body* rigid, std::vector<GLfloat>& init_force_pt, std::vector<std::vector<GLfloat>>& force_t, float time_steps);
+int apply_continous_force(Rigid_body* rigid, std::vector<GLfloat>& init_force_pt, std::vector<std::vector<GLfloat>>& force_t, float time_steps, float dt);
 void update_position(Rigid_body* rigid, float time_step);
 void subtr_3Dvectors(std::vector<GLfloat>& v_r, std::vector<GLfloat>& v_a);
 void GJK_minkowski_diff(Rigid_body* rigid1, Rigid_body* rigid2, std::vector<std::vector<GLfloat>>& res);
@@ -115,14 +116,22 @@ bool GJK_add_vec_optimizeSimplex(convexHull* convHull, std::vector<GLfloat>& v);
 void GJK_main(std::vector<std::vector<GLfloat>>& CSO, convexHull* convHull, std::vector<GLfloat>& cp);
 void GJK(Rigid_body* rigid1, Rigid_body* rigid2, convexHull* convHull, std::vector<GLfloat>& cp);
 bool recoverPoinTofCollision(Rigid_body* rigid1, Rigid_body* rigid2, std::vector<GLfloat>& p, std::vector<GLfloat>& res);
-void detectAndFindCollisionPoint(Rigid_body* rigid1, Rigid_body* rigid2, convexHull* convHull);
+bool detectCollisions(int hit_box1, int hit_box2, std::vector<std::vector<GLfloat>>& hitMesh1, std::vector<std::vector<GLfloat>>& hitMesh2);
+void detectAndFindCollisionPoint(Rigid_body* rigid1, Rigid_body* rigid2, convexHull* convHull, bool detected);
 void createPolygonNormal(Rigid_body* rigid, std::vector<GLfloat>& init_pt, std::vector<GLfloat>& n, int& c);
 float approx_E(Rigid_body* rigid1, Rigid_body* rigid2);
 std::vector<GLfloat> calc_collision_force(Rigid_body* rigid1, Rigid_body* rigid2);
 std::vector<GLfloat> newton_3rd_law(std::vector<GLfloat>& F1);
-void gravity(Rigid_body* rigid);
-void distrib_gravity(Rigid_body* rigid);
+void gravityElem(Rigid_body* rigid, GLfloat m_elem, std::vector<GLfloat>& G_elem);
+void setGravity(Rigid_body* rigid, std::vector<std::vector<GLfloat>>& G_distrib);
+void distributeGravity(Rigid_body* rigid);
+void apply_gravity(Rigid_body* rigid, float time_stamp);
+void remove_gravity(Rigid_body* rigid);
+void apply_continous_gravity(Rigid_body* rigid, float time_steps, float dt);
 
 // simulating over time
-
+void loadBody(Rigid_body* rigid, std::vector<std::vector<std::vector<GLfloat>>>& body, int meshType);
+void initiate_physics(Rigid_body* rigid, std::vector<std::vector<std::vector<GLfloat>>>& body, std::vector<int> polygons, bool modifyMassDistribution, std::vector<GLfloat> mass_distribution, GLfloat M, int meshType);
+void addForce(Rigid_body* rigid);
+void singleRigidBodyPhysics(Rigid_body* currBody, std::vector<Rigid_body>& bodyList, bool applyLinearForce);
 #endif

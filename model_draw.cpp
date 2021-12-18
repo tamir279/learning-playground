@@ -328,3 +328,5 @@ void drawCheckerBoard_LEGACY_GL(int Cwidth, int Cdepth, GLfloat COLOR1[], GLfloa
 	glEnd();
 	glDisable(GL_COLOR_MATERIAL);
 }
+
+// demo for testing
