@@ -11,6 +11,7 @@
 #include <string>
 #include "image_path_loader.h"
 #include "obj_model_read_write.h"
+#include "rigid_body_physics.h"
 
 // defines
 #pragma warning( push )
@@ -329,4 +330,14 @@ void drawCheckerBoard_LEGACY_GL(int Cwidth, int Cdepth, GLfloat COLOR1[], GLfloa
 	glDisable(GL_COLOR_MATERIAL);
 }
 
-// demo for testing
+// default setting
+void display_scene_obj() {
+
+	std::vector<GLfloat> init_cam_pos = { 3.0, 6.0, 7.0 };
+	std::vector<GLfloat> cam_trans = { 0, 0, -1 };
+	std::vector<GLfloat> cam_rot = { 0, 0, 0 };
+	std::vector<GLfloat> init_light_pos = { 1, 3, 5 };
+	std::vector<GLfloat> light_trans = { 0, 0, 0 };
+	std::vector<GLfloat> light_rot = { 0, 0, 60 };
+	display_scene_light_LEGACY_GL(init_cam_pos, cam_trans, cam_rot, init_light_pos, light_trans, light_rot);
+}

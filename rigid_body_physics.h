@@ -134,4 +134,7 @@ void loadBody(Rigid_body* rigid, std::vector<std::vector<std::vector<GLfloat>>>&
 void initiate_physics(Rigid_body* rigid, std::vector<std::vector<std::vector<GLfloat>>>& body, std::vector<int> polygons, bool modifyMassDistribution, std::vector<GLfloat> mass_distribution, GLfloat M, int meshType);
 void addForce(Rigid_body* rigid);
 void singleRigidBodyPhysics(Rigid_body* currBody, std::vector<Rigid_body>& bodyList, bool applyLinearForce);
+void draw_multipleFlatRigidBodies_LEGACY_GL(std::vector<Rigid_body>& bodies, GLenum render_type);
+void generate_icosahedron_rigidBody_array(std::vector<Rigid_body>& bodyList);
+void systemPhysicsLoop(int val);
 #endif

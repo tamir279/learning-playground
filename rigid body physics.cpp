@@ -11,6 +11,7 @@
 #include <math.h>
 #include <random>
 #include <assert.h>
+#include "model_draw.h"
 #include "rigid_body_physics.h"
 
 #define DETER_SUBSAMPLE -1
@@ -2260,7 +2261,62 @@ void singleRigidBodyPhysics(Rigid_body* currBody,
 	}
 }
 
-void systemPhysicsLoop(std::vector<Rigid_body>& bodyList, std::vector<bool>& applyLinearForce, bool gravityApplied) {
+// for the graphics rendering
+void draw_multipleFlatRigidBodies_LEGACY_GL(std::vector<Rigid_body>& bodies, GLenum render_type) {
+
+	for (auto obj = bodies.begin(); obj != bodies.end(); ++obj) {
+		std::vector<std::vector<GLfloat>> v = obj->bodyPos;
+		draw_flat_obj_LEGACY_GL(v, render_type);
+	}
+}
+
+void generate_icosahedron_rigidBody_array(std::vector<Rigid_body>& bodyList) {
+
+	// for icosahedrons
+	std::vector<int> p_z;
+	for (int j = 0; j < 20; j++) { p_z.push_back(3); }
+	std::vector<GLfloat> massD;
+	for (int k = 0; k < 12; k++) { massD.push_back(1 / 12); }
+
+	std::vector<Rigid_body> bodyL;
+	int i = 0;
+	while (i < 5) {
+		// calculate mesh
+		std::vector<std::vector<GLfloat>> mesh;
+		std::vector<std::vector<std::vector<GLfloat>>> meshObj;
+		int rand_x = generate_random_number_INT(0, 10);
+		int rand_y = generate_random_number_INT(0, 10);
+		int rand_z = generate_random_number_INT(0, 10);
+		GLfloat center[3] = { rand_x, rand_y, rand_z };
+		generate_tinyCONVEX_mesh(mesh, center, 1);
+		meshObj.push_back(mesh);
+		
+
+		Rigid_body body;
+		initiate_physics(&body, meshObj, p_z, false, massD, 50, BOUNDING_BOX);
+		bodyL.push_back(body);
+	}
+	bodyList = bodyL;
+}
+
+// for a demo
+void systemPhysicsLoop(int val) {
 	// display bodies & scene - from model_draw. TODO in *MODEL_DRAW* - to create a function that draws multiple bodies
 	//loop over all to check for collisions and update physics
+
+	bool gravityApplied = true;
+	std::vector<bool> applyLinearForce = { false, false, true, true, false };
+	std::vector<Rigid_body> bodyList;
+	generate_icosahedron_rigidBody_array(bodyList);
+
+	draw_multipleFlatRigidBodies_LEGACY_GL(bodyList, GL_TRIANGLES);
+
+	int i = 0;
+	for (auto b = bodyList.begin(); b != bodyList.end(); ++b) {
+		Rigid_body body = *b;
+		singleRigidBodyPhysics(&body, bodyList, applyLinearForce[i]);
+		i++; b++;
+	}
+
+	glutTimerFunc(1, systemPhysicsLoop, 0);
 }

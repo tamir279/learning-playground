@@ -37,5 +37,5 @@ void display_scene_light_LEGACY_GL(std::vector<GLfloat>& init_cam_pos, std::vect
 void draw_flat_obj_LEGACY_GL(std::vector<std::vector<GLfloat>>& indexed_vertices, GLenum render_type);
 void draw_wireframe_LEGACY_GL(std::vector<std::vector<GLfloat>>& indexed_vertices);
 void drawCheckerBoard_LEGACY_GL(int Cwidth, int Cdepth, GLfloat COLOR1[], GLfloat COLOR2[]);
-
+void display_scene_obj();
 #endif
