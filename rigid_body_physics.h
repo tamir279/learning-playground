@@ -56,7 +56,56 @@ bool detect_collision_CONVEX_vs_CONVEX_or_SPHERE(std::vector<std::vector<GLfloat
 class col_detect;
 
 // simple physics -- for a given time t_0
-typedef struct Rigid_body;
+/* ------------------------ define a rigid body ------------------------- */
+typedef struct rigidBodyParams {
+	// geometric data
+	std::vector<std::vector<GLfloat>>              bodyPos;
+	std::vector<int>                               body_polygon_size;
+	std::vector<std::vector<GLfloat>>              hitBoxPos;
+	std::vector<GLfloat>                           collisionPosition;
+	std::vector<std::vector<GLfloat>>              rotation_LEGACY_GL;
+
+	// material information
+	std::vector<std::string>                       materialMap;
+
+	// mass distribution
+	std::vector<GLfloat>                           massDistribution;
+	GLfloat                                        mass                        = 0;
+	std::vector<GLfloat>                           centerOfMass;
+
+	// technical possebilities
+	bool                                           gravityApplied              = true;
+	bool                                           isFullyElasticAndRigid      = true;
+	bool                                           collision_allowed           = true;
+	int                                            hitBoxType                  = 100; // bounding box
+	bool                                           collided                    = false;
+
+	// force information
+	std::vector<std::vector<GLfloat>>              initPts;
+	std::vector<GLfloat>                           CenterGravityForce;
+	std::vector<std::vector<GLfloat>>              collisionForces;
+	std::vector<std::vector<GLfloat>>              Force_distrib_radial;
+	std::vector<std::vector<GLfloat>>              Force_distrib_tangent;
+	std::vector<std::vector<std::vector<GLfloat>>> Force_distribContainer;
+	std::vector<GLfloat>                           torque;
+	std::vector<GLfloat>                           staticFriction_Force;
+	std::vector<GLfloat>                           kineticFriction_Force;
+
+	// velocities and acceleration information
+	std::vector<GLfloat>                           linearVelocity;
+	std::vector<GLfloat>                           linearAcceleration;
+	std::vector<std::vector<GLfloat>>              linearVelocityElements;
+	std::vector<GLfloat>                           angularVelocity;
+	std::vector<GLfloat>                           angularAcceleration;
+	std::vector<std::vector<GLfloat>>              tangentVelocityElements;
+
+	// momentum and inertia information
+	std::vector<GLfloat>                           linearMomentum;
+	std::vector<GLfloat>                           angularMomentum;
+	std::vector<std::vector<GLfloat>>              inertiaTensor;
+	std::vector<std::vector<GLfloat>>              inertiaTensorRotation;
+}Rigid_body;
+
 void default_RigidMass_distribution(Rigid_body* rigidBody);
 void modify_RigidMass_distribution(Rigid_body* rigidBody, std::vector<GLfloat>& distrib);
 void calculate_center_mass(Rigid_body* rigidBody);
@@ -99,7 +148,16 @@ void subtr_3Dvectors(std::vector<GLfloat>& v_r, std::vector<GLfloat>& v_a);
 void GJK_minkowski_diff(Rigid_body* rigid1, Rigid_body* rigid2, std::vector<std::vector<GLfloat>>& res);
 void GJK_shortest_dst_pt(std::vector<std::vector<GLfloat>>& mink_diff, std::vector<GLfloat>& axis, std::vector<GLfloat>& pt);
 void GJK_MinimumNormLine(std::vector<std::vector<GLfloat>>& simplex, std::vector<GLfloat>& pt);
-typedef struct convexHull;
+
+/* create a convexHull */
+typedef struct {
+	std::vector<std::vector<GLfloat>> simplex;
+	int simplexSize = 0;
+	std::vector<std::vector<std::vector<GLfloat>>> convexHullPoints;
+	std::vector<GLfloat> minNormPoint;
+
+}convexHull;
+
 void createLine(std::vector<GLfloat>& i_p, std::vector<GLfloat>& e_p, std::vector<std::vector<GLfloat>>& line);
 void create_ConvexLine(convexHull* convHull);
 void createTriangle(std::vector<GLfloat>& i1, std::vector<GLfloat>& e1, std::vector<GLfloat>& i2, std::vector<GLfloat>& e2, std::vector<GLfloat>& i3, std::vector<GLfloat>& e3, std::vector<std::vector<std::vector<GLfloat>>>& tmp);

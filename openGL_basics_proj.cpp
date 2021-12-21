@@ -1,6 +1,6 @@
 ﻿// openGL_basics_proj.cpp : This file contains the 'main' function. Program execution begins and ends there.
 //
-
+#pragma comment(lib, "glew32.lib")
 #include "glew.h"
 #include <windows.h>
 #include <iostream>
@@ -12,6 +12,8 @@
 #include <string>
 #include <math.h>
 #include <random>
+#include "image_path_loader.h"
+#include "obj_model_read_write.h"
 #include "rigid_body_physics.h"
 #include "model_draw.h"
 
@@ -30,14 +32,38 @@ void initGlew(void) {
 	}
 }
 
+std::vector<Rigid_body> bodyList;
+
+// for a demo
+void systemPhysicsLoop(int val) {
+	// display bodies & scene - from model_draw. TODO in *MODEL_DRAW* - to create a function that draws multiple bodies
+	//loop over all to check for collisions and update physics
+
+	bool gravityApplied = true;
+	std::vector<bool> applyLinearForce = { false, false, true, true, false };
+
+
+	draw_multipleFlatRigidBodies_LEGACY_GL(bodyList, GL_TRIANGLES);
+
+	int i = 0;
+	for (auto b = bodyList.begin(); b != bodyList.end(); ++b) {
+		Rigid_body body = *b;
+		singleRigidBodyPhysics(&body, bodyList, applyLinearForce[i]);
+		i++; b++;
+	}
+
+	glutTimerFunc(1, systemPhysicsLoop, 0);
+}
+
+
 void init(void) {
+	generate_icosahedron_rigidBody_array(bodyList);
 	init_scene_params_LEGACY_GL(fogMode, shade_mode);
 }
 
 void display(void) {
-	std::vector<Rigid_body> bodyList;
-	generate_icosahedron_rigidBody_array(bodyList);
 
+	display_scene_obj();
 	draw_multipleFlatRigidBodies_LEGACY_GL(bodyList, GL_TRIANGLES);
 }
 

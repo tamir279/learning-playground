@@ -38,22 +38,29 @@
 
 void translate_vertices_LEGACY_GL(std::vector<std::vector<std::vector<GLfloat>>>& vertices_per_object,
 	std::vector<std::vector<GLfloat>>& vertex_vec) {
+
+	std::vector<std::vector<GLfloat>> tmp;
+
 	for (int i = 0; i < (int)vertices_per_object.size(); i++) {
 		for (int j = 0; j < (int)vertices_per_object[i].size(); j++) {
-			vertex_vec.push_back(vertices_per_object[i][j]);
+			tmp.push_back(vertices_per_object[i][j]);
 		}
 	}
+	vertex_vec = tmp;
 }
 
 void sortByIndex(GLfloat vertex_data[], GLushort index[], int ISIZE, std::vector<std::vector<GLfloat>>& vertex_vec) {
 	int vec_size = 3;
+	std::vector<std::vector<GLfloat>> tmpVertexVec;
+
 	for (int i = 0; i < ISIZE; i++) {
 		std::vector<GLfloat> vertex;
 		vertex.push_back(vertex_data[index[i] * vec_size]);
 		vertex.push_back(vertex_data[index[i] * vec_size + 1]);
 		vertex.push_back(vertex_data[index[i] * vec_size + 2]);
-		vertex_vec.push_back(vertex);
+		tmpVertexVec.push_back(vertex);
 	}
+	vertex_vec = tmpVertexVec;
 }
 
 void generate_tinyBOX_mesh(std::vector<std::vector<GLfloat>>& vertex_vec, GLfloat center[], GLfloat epsilon) {
@@ -257,9 +264,11 @@ void generate_SUBSAMPLE_mesh(std::vector<std::vector<GLfloat>>& mesh,
 
 	int i1 = 0;
 	int i2 = 0;
+	std::vector<std::vector<GLfloat>> tmpMesh;
+
 	if (sample_mode == DETER_SUBSAMPLE) {
 		while (i1 < (int)orig_mesh.size()) {
-			mesh.push_back(orig_mesh[i1]);
+			tmpMesh.push_back(orig_mesh[i1]);
 			i1 += SUBSAMPLE_GAP;
 		}
 	}
@@ -268,10 +277,11 @@ void generate_SUBSAMPLE_mesh(std::vector<std::vector<GLfloat>>& mesh,
 		int mesh_size = (int)ceil(size_ratio);
 		while (i2 < mesh_size) {
 			int rand_num = generate_random_number_INT(0, (int)orig_mesh.size() - 1);
-			mesh.push_back(orig_mesh[rand_num]);
+			tmpMesh.push_back(orig_mesh[rand_num]);
 			i2++;
 		}
 	}
+	mesh = tmpMesh;
 }
 
 void init_3Dvec(std::vector<GLfloat>& v) {
@@ -326,20 +336,22 @@ GLfloat* geometrig_center(std::vector<std::vector<GLfloat>>& model_mesh) {
 bool detect_boundries(std::vector<std::vector<GLfloat>>& model_mesh,
 	std::vector<std::vector<GLfloat>>& bounding_mesh, GLfloat center[]) {
 
+	std::vector<std::vector<GLfloat>> tmp_model = model_mesh;
+	std::vector<std::vector<GLfloat>> tmp_bounds = bounding_mesh;
 	std::vector<GLfloat> geomCenter(center, center + 3);
 	scale_3Dvectors(geomCenter, -1.0);
-	add_3Dvec_to_mesh(model_mesh, geomCenter);
-	add_3Dvec_to_mesh(bounding_mesh, geomCenter);
+	add_3Dvec_to_mesh(tmp_model, geomCenter);
+	add_3Dvec_to_mesh(tmp_bounds, geomCenter);
 
 	bool broke = false;
-	for (int l1 = 0; l1 < (int)model_mesh.size(); l1++) {
-		float d1 = fast_sqrt((float)(model_mesh[l1][0] * model_mesh[l1][0]) +
-			(float)(model_mesh[l1][1] * model_mesh[l1][1]) +
-			(float)(model_mesh[l1][2] * model_mesh[l1][2]));
-		for (int l2 = 0; l2 < (int)bounding_mesh.size(); l2++) {
-			float d2 = fast_sqrt((float)(bounding_mesh[l2][0] * bounding_mesh[l2][0]) +
-				(float)(bounding_mesh[l2][1] * bounding_mesh[l2][1]) +
-				(float)(bounding_mesh[l2][2] * bounding_mesh[l2][2]));
+	for (int l1 = 0; l1 < (int)tmp_model.size(); l1++) {
+		float d1 = fast_sqrt((float)(tmp_model[l1][0] * tmp_model[l1][0]) +
+			(float)(tmp_model[l1][1] * tmp_model[l1][1]) +
+			(float)(tmp_model[l1][2] * tmp_model[l1][2]));
+		for (int l2 = 0; l2 < (int)tmp_bounds.size(); l2++) {
+			float d2 = fast_sqrt((float)(tmp_bounds[l2][0] * tmp_bounds[l2][0]) +
+				(float)(tmp_bounds[l2][1] * tmp_bounds[l2][1]) +
+				(float)(tmp_bounds[l2][2] * tmp_bounds[l2][2]));
 			if (d1 > d2) {
 				broke = true;
 				break;
@@ -359,11 +371,13 @@ void inflate_mesh(std::vector<std::vector<GLfloat>>& model_mesh,
 	GLfloat init_scale,
 	GLfloat step) {
 
+	std::vector<std::vector<GLfloat>> tmpBounds = bounding_mesh;
 	GLfloat scale = init_scale;
-	while (!detect_boundries(model_mesh, bounding_mesh, center)) {
+	while (!detect_boundries(model_mesh, tmpBounds, center)) {
 		scale += step;
-		scale_3Dmesh(bounding_mesh, scale);
+		scale_3Dmesh(tmpBounds, scale);
 	}
+	bounding_mesh = tmpBounds;
 }
 
 void fitMesh(std::vector<std::vector<GLfloat>>& model_mesh, std::vector<std::vector<GLfloat>>& bounding_mesh, int mesh_type) {
@@ -372,20 +386,22 @@ void fitMesh(std::vector<std::vector<GLfloat>>& model_mesh, std::vector<std::vec
 	GLfloat scaleFactor = 1.0;
 
 	GLfloat* geomCenter = geometrig_center(model_mesh);
+	std::vector<std::vector<GLfloat>> tmpBounds;
 
 	switch (mesh_type) {
 	case BOUNDING_BOX:
-		generate_tinyBOX_mesh(bounding_mesh, geomCenter, epsilon);
-		inflate_mesh(model_mesh, bounding_mesh, geomCenter, scaleFactor, step);
+		generate_tinyBOX_mesh(tmpBounds, geomCenter, epsilon);
+		inflate_mesh(model_mesh, tmpBounds, geomCenter, scaleFactor, step);
 	case BOUNDING_CONVEX:
-		generate_tinyCONVEX_mesh(bounding_mesh, geomCenter, epsilon);
-		inflate_mesh(model_mesh, bounding_mesh, geomCenter, scaleFactor, step);
+		generate_tinyCONVEX_mesh(tmpBounds, geomCenter, epsilon);
+		inflate_mesh(model_mesh, tmpBounds, geomCenter, scaleFactor, step);
 	case BOUNDING_SPHERE:
-		generate_tinySPHERE_mesh(bounding_mesh, geomCenter, epsilon, SUBDIV_DEPTH);
-		inflate_mesh(model_mesh, bounding_mesh, geomCenter, scaleFactor, step);
+		generate_tinySPHERE_mesh(tmpBounds, geomCenter, epsilon, SUBDIV_DEPTH);
+		inflate_mesh(model_mesh, tmpBounds, geomCenter, scaleFactor, step);
 	case SUB_MESH:
-		generate_SUBSAMPLE_mesh(bounding_mesh, model_mesh, DETER_SUBSAMPLE);
+		generate_SUBSAMPLE_mesh(tmpBounds, model_mesh, DETER_SUBSAMPLE);
 	}
+	bounding_mesh = tmpBounds;
 }
 
 void fitMesh_from_orig_Model_LEGACY_GL(std::vector<std::vector<std::vector<GLfloat>>>& vertices,
@@ -654,56 +670,6 @@ bool col_detect::detect_CONVEX_CONVEX_or_SPHERE(std::vector<std::vector<GLfloat>
 	return detect_collision_CONVEX_vs_CONVEX_or_SPHERE(col_mesh1, col_mesh2);
 }
 
-/* ------------------------ define a rigid body ------------------------- */
-typedef struct {
-	// geometric data
-	std::vector<std::vector<GLfloat>>              bodyPos;
-	std::vector<int>                               body_polygon_size;
-	std::vector<std::vector<GLfloat>>              hitBoxPos;
-	std::vector<GLfloat>                           collisionPosition;
-	std::vector<std::vector<GLfloat>>              rotation_LEGACY_GL;
-
-	// material information
-	std::vector<std::string>                       materialMap;
-
-	// mass distribution
-	std::vector<GLfloat>                           massDistribution;
-	GLfloat                                        mass;
-	std::vector<GLfloat>                           centerOfMass;
-
-	// technical possebilities
-	bool                                           gravityApplied;
-	bool                                           isFullyElasticAndRigid;
-	bool                                           collision_allowed;
-	int                                            hitBoxType;
-	bool                                           collided;
-
-	// force information
-	std::vector<std::vector<GLfloat>>              initPts;
-	std::vector<GLfloat>                           CenterGravityForce;
-	std::vector<std::vector<GLfloat>>              collisionForces;
-	std::vector<std::vector<GLfloat>>              Force_distrib_radial;
-	std::vector<std::vector<GLfloat>>              Force_distrib_tangent;
-	std::vector<std::vector<std::vector<GLfloat>>> Force_distribContainer;
-	std::vector<GLfloat>                           torque;
-	std::vector<GLfloat>                           staticFriction_Force;
-	std::vector<GLfloat>                           kineticFriction_Force;
-
-	// velocities and acceleration information
-	std::vector<GLfloat>                           linearVelocity;
-	std::vector<GLfloat>                           linearAcceleration;
-	std::vector<std::vector<GLfloat>>              linearVelocityElements;
-	std::vector<GLfloat>                           angularVelocity;
-	std::vector<GLfloat>                           angularAcceleration;
-	std::vector<std::vector<GLfloat>>              tangentVelocityElements;
-
-	// momentum and inertia information
-	std::vector<GLfloat>                           linearMomentum;
-	std::vector<GLfloat>                           angularMomentum;
-	std::vector<std::vector<GLfloat>>              inertiaTensor;
-	std::vector<std::vector<GLfloat>>              inertiaTensorRotation;
-}Rigid_body;
-
 /* ------------------------ basic physics functions - simulate a force on a rigid body ---------------------------*/
 
 // structure that defines the physical parameters of a rigid body - at a specific time!
@@ -933,7 +899,8 @@ void distrib_force_to_polygon(std::vector<GLfloat>& force,
 	find_poly_interval(poly, min_poly, min_ind, max_ind);
 	// the colsest point gets 60% of the force distributed to, the other points get equal distribution
 	GLfloat cl_scale = 0.6;
-	GLfloat surr_scale = 0.4 / (GLfloat)(max_ind - min_ind + 1);
+	int inv_res = max_ind - min_ind + 1;
+	GLfloat surr_scale = 0.4 / (GLfloat)(inv_res);
 	int i = 0;
 	while (i < (int)body.size()) {
 		if (i >= min_ind && i <= max_ind) {
@@ -1382,9 +1349,9 @@ void subtr_3Dvectors(std::vector<GLfloat>& v_r, std::vector<GLfloat>& v_a) {
 }
 
 void add_toCont3Dvecs(std::vector<GLfloat>& a, std::vector<GLfloat>& b, std::vector<GLfloat>& c) {
-	c[0] = 0.5 * (a[0] + b[0]);
-	c[1] = 0.5 * (a[1] + b[1]);
-	c[2] = 0.5 * (a[2] + b[2]);
+	c[0] = 0.5 * a[0] + 0.5 * b[0];
+	c[1] = 0.5 * a[1] + 0.5 * b[1];
+	c[2] = 0.5 * a[2] + 0.5 * b[2];
 }
 
 // GJK algorithm for detecting collisions and finding the point of collision
@@ -1435,14 +1402,6 @@ void GJK_MinimumNormLine(std::vector<std::vector<GLfloat>>& simplex, std::vector
 	}
 	pt = simplex[min_ind];
 }
-
-typedef struct {
-	std::vector<std::vector<GLfloat>> simplex;
-	int simplexSize;
-	std::vector<std::vector<std::vector<GLfloat>>> convexHullPoints;
-	std::vector<GLfloat> minNormPoint;
-	
-}convexHull;
 
 void createLine(std::vector<GLfloat>& i_p, std::vector<GLfloat>& e_p, std::vector<std::vector<GLfloat>>& line) {
 	GLfloat step = 0.1;
@@ -2276,7 +2235,7 @@ void generate_icosahedron_rigidBody_array(std::vector<Rigid_body>& bodyList) {
 	std::vector<int> p_z;
 	for (int j = 0; j < 20; j++) { p_z.push_back(3); }
 	std::vector<GLfloat> massD;
-	for (int k = 0; k < 12; k++) { massD.push_back(1 / 12); }
+	for (int k = 0; k < 12; k++) { massD.push_back(0.08333333333); }
 
 	std::vector<Rigid_body> bodyL;
 	int i = 0;
@@ -2287,7 +2246,7 @@ void generate_icosahedron_rigidBody_array(std::vector<Rigid_body>& bodyList) {
 		int rand_x = generate_random_number_INT(0, 10);
 		int rand_y = generate_random_number_INT(0, 10);
 		int rand_z = generate_random_number_INT(0, 10);
-		GLfloat center[3] = { rand_x, rand_y, rand_z };
+		GLfloat center[3] = { (GLfloat)rand_x, (GLfloat)rand_y, (GLfloat)rand_z };
 		generate_tinyCONVEX_mesh(mesh, center, 1);
 		meshObj.push_back(mesh);
 		
@@ -2299,24 +2258,3 @@ void generate_icosahedron_rigidBody_array(std::vector<Rigid_body>& bodyList) {
 	bodyList = bodyL;
 }
 
-// for a demo
-void systemPhysicsLoop(int val) {
-	// display bodies & scene - from model_draw. TODO in *MODEL_DRAW* - to create a function that draws multiple bodies
-	//loop over all to check for collisions and update physics
-
-	bool gravityApplied = true;
-	std::vector<bool> applyLinearForce = { false, false, true, true, false };
-	std::vector<Rigid_body> bodyList;
-	generate_icosahedron_rigidBody_array(bodyList);
-
-	draw_multipleFlatRigidBodies_LEGACY_GL(bodyList, GL_TRIANGLES);
-
-	int i = 0;
-	for (auto b = bodyList.begin(); b != bodyList.end(); ++b) {
-		Rigid_body body = *b;
-		singleRigidBodyPhysics(&body, bodyList, applyLinearForce[i]);
-		i++; b++;
-	}
-
-	glutTimerFunc(1, systemPhysicsLoop, 0);
-}
