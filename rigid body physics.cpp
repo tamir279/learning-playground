@@ -11,6 +11,7 @@
 #include <math.h>
 #include <random>
 #include <assert.h>
+#include <algorithm>
 #include "model_draw.h"
 #include "rigid_body_physics.h"
 
@@ -49,18 +50,14 @@ void translate_vertices_LEGACY_GL(std::vector<std::vector<std::vector<GLfloat>>>
 	vertex_vec = tmp;
 }
 
-void sortByIndex(GLfloat vertex_data[], GLushort index[], int ISIZE, std::vector<std::vector<GLfloat>>& vertex_vec) {
+void sortByIndex(std::vector<std::vector<GLfloat>>& mesh, std::vector<GLushort>& ind_arr, std::vector<std::vector<GLfloat>>& sorted) {
 	int vec_size = 3;
 	std::vector<std::vector<GLfloat>> tmpVertexVec;
-
-	for (int i = 0; i < ISIZE; i++) {
-		std::vector<GLfloat> vertex;
-		vertex.push_back(vertex_data[index[i] * vec_size]);
-		vertex.push_back(vertex_data[index[i] * vec_size + 1]);
-		vertex.push_back(vertex_data[index[i] * vec_size + 2]);
-		tmpVertexVec.push_back(vertex);
+	
+	for (int i = 0; i < (int)ind_arr.size(); i++) {
+		tmpVertexVec.push_back(mesh[ind_arr[i]]);
 	}
-	vertex_vec = tmpVertexVec;
+	sorted = tmpVertexVec;
 }
 
 void generate_tinyBOX_mesh(std::vector<std::vector<GLfloat>>& vertex_vec, GLfloat center[], GLfloat epsilon) {
@@ -93,8 +90,14 @@ void generate_tinyBOX_mesh(std::vector<std::vector<GLfloat>>& vertex_vec, GLfloa
 		3, 2, 6,
 		6, 7, 3
 	};
-	int index_size = 12; // for a trianglular polygon cube
-	sortByIndex(cube_vertices, cube_index, index_size, vertex_vec);
+	std::vector<GLfloat> vertexV(cube_vertices, cube_vertices + 8 * 3);
+	std::vector<GLushort> indV(cube_index, cube_index + 12 * 3);
+	std::vector<GLfloat> indV_float(indV.begin(), indV.end());
+
+	std::vector<std::vector<GLfloat>> tmpV;
+	tmpV.push_back(vertexV);
+	tmpV.push_back(indV_float);
+	vertex_vec = tmpV;
 }
 
 void generate_tinyCONVEX_mesh(std::vector<std::vector<GLfloat>>& mesh, GLfloat center[], GLfloat epsilon) {
@@ -142,8 +145,31 @@ void generate_tinyCONVEX_mesh(std::vector<std::vector<GLfloat>>& mesh, GLfloat c
 	   9,2,5,
 	   7,2,11
 	};
-	int index_size = 20; // for a trianglular polygon convex solid (icosahedron)
-	sortByIndex(vdata, indices, index_size, mesh);
+	
+	std::vector<GLfloat> vertexV(vdata, vdata + 12 * 3);
+	std::vector<GLushort> indV(indices, indices + 20 * 3);
+	std::vector<GLfloat> indV_float(indV.begin(), indV.end());
+
+	std::vector<std::vector<GLfloat>> tmpV;
+	tmpV.push_back(vertexV);
+	tmpV.push_back(indV_float);
+	mesh = tmpV;
+}
+
+void convert_toMatrix(std::vector<std::vector<GLfloat>>& vertexVector, std::vector<GLfloat>& longVec) {
+	int vec_size = 3;
+	std::vector<GLfloat> v = longVec;
+	std::vector<std::vector<GLfloat>> tmpVertexVec;
+	
+	for (int i = 0; i < (int)longVec.size()/vec_size; i++) {
+		std::cout << i << "\n";
+		std::vector<GLfloat> vertex;
+		vertex.push_back(v[i * vec_size]);
+		vertex.push_back(v[i * vec_size + 1]);
+		vertex.push_back(v[i * vec_size + 2]);
+		tmpVertexVec.push_back(vertex);
+	}
+	vertexVector = tmpVertexVec;
 }
 
 // uses halley's method of approximating square root
@@ -211,6 +237,7 @@ void PolygonSubdivision(float* v1, float* v2, float* v3, long depth, std::vector
 	PolygonSubdivision(v12, v23, v31, depth - 1, mesh);
 }
 
+// for later fix
 void generate_tinySPHERE_mesh(std::vector<std::vector<GLfloat>>& mesh, GLfloat center[3], GLfloat epsilon, int depth) {
 	// icosahedron mesh 
 	GLfloat X = 0.5257 * epsilon;
@@ -285,9 +312,9 @@ void generate_SUBSAMPLE_mesh(std::vector<std::vector<GLfloat>>& mesh,
 }
 
 void init_3Dvec(std::vector<GLfloat>& v) {
-	v.push_back(0.0);
-	v.push_back(0.0);
-	v.push_back(0.0);
+	v[0] = 0.0;
+	v[1] = 0.0;
+	v[2] = 0.0;
 }
 
 void add_3Dvectors(std::vector<GLfloat>& v_r, std::vector<GLfloat>& v_a) {
@@ -317,13 +344,16 @@ void scale_3Dmesh(std::vector<std::vector<GLfloat>>& mesh, GLfloat scale) {
 GLfloat* geometrig_center(std::vector<std::vector<GLfloat>>& model_mesh) {
 	std::vector<GLfloat> center(3);
 	init_3Dvec(center);
-	std::vector<std::vector<GLfloat>>::iterator v = model_mesh.begin();
-	while (v != model_mesh.end()) {
+
+	for(auto v = model_mesh.begin(); v != model_mesh.end(); ++v) {
 		add_3Dvectors(center, *v);
-		v++;
 	}
-	GLfloat scale = (GLfloat)(1 / model_mesh.size());
+
+	GLfloat scale = (GLfloat)(1 / (GLfloat)model_mesh.size());
 	scale_3Dvectors(center, scale);
+	// size is 6 (????)
+	std::cout << "\n" << "center size is:";
+	std::cout << "\n" << center.size() << "\n" << "\n";
 
 	GLfloat* geomCenter = new GLfloat[3];
 	std::copy(center.begin(), center.end(), geomCenter);
@@ -345,14 +375,14 @@ bool detect_boundries(std::vector<std::vector<GLfloat>>& model_mesh,
 
 	bool broke = false;
 	for (int l1 = 0; l1 < (int)tmp_model.size(); l1++) {
-		float d1 = fast_sqrt((float)(tmp_model[l1][0] * tmp_model[l1][0]) +
+		float d1_sq = (float)(tmp_model[l1][0] * tmp_model[l1][0]) +
 			(float)(tmp_model[l1][1] * tmp_model[l1][1]) +
-			(float)(tmp_model[l1][2] * tmp_model[l1][2]));
+			(float)(tmp_model[l1][2] * tmp_model[l1][2]);
 		for (int l2 = 0; l2 < (int)tmp_bounds.size(); l2++) {
-			float d2 = fast_sqrt((float)(tmp_bounds[l2][0] * tmp_bounds[l2][0]) +
+			float d2_sq = (float)(tmp_bounds[l2][0] * tmp_bounds[l2][0]) +
 				(float)(tmp_bounds[l2][1] * tmp_bounds[l2][1]) +
-				(float)(tmp_bounds[l2][2] * tmp_bounds[l2][2]));
-			if (d1 > d2) {
+				(float)(tmp_bounds[l2][2] * tmp_bounds[l2][2]);
+			if (d1_sq > d2_sq) {
 				broke = true;
 				break;
 			}
@@ -382,26 +412,35 @@ void inflate_mesh(std::vector<std::vector<GLfloat>>& model_mesh,
 
 void fitMesh(std::vector<std::vector<GLfloat>>& model_mesh, std::vector<std::vector<GLfloat>>& bounding_mesh, int mesh_type) {
 	GLfloat epsilon = 0.1;
-	GLfloat step = 0.0005;
+	GLfloat step = 0.005;
 	GLfloat scaleFactor = 1.0;
 
 	GLfloat* geomCenter = geometrig_center(model_mesh);
 	std::vector<std::vector<GLfloat>> tmpBounds;
+	std::vector<std::vector<GLfloat>> tmpVector;
 
-	switch (mesh_type) {
-	case BOUNDING_BOX:
+	if (mesh_type == BOUNDING_BOX) {
 		generate_tinyBOX_mesh(tmpBounds, geomCenter, epsilon);
-		inflate_mesh(model_mesh, tmpBounds, geomCenter, scaleFactor, step);
-	case BOUNDING_CONVEX:
-		generate_tinyCONVEX_mesh(tmpBounds, geomCenter, epsilon);
-		inflate_mesh(model_mesh, tmpBounds, geomCenter, scaleFactor, step);
-	case BOUNDING_SPHERE:
-		generate_tinySPHERE_mesh(tmpBounds, geomCenter, epsilon, SUBDIV_DEPTH);
-		inflate_mesh(model_mesh, tmpBounds, geomCenter, scaleFactor, step);
-	case SUB_MESH:
-		generate_SUBSAMPLE_mesh(tmpBounds, model_mesh, DETER_SUBSAMPLE);
+		convert_toMatrix(tmpVector, tmpBounds[0]);
+		inflate_mesh(model_mesh, tmpVector, geomCenter, scaleFactor, step);
 	}
-	bounding_mesh = tmpBounds;
+	else if (mesh_type == BOUNDING_CONVEX) {
+		generate_tinyCONVEX_mesh(tmpBounds, geomCenter, epsilon);
+		convert_toMatrix(tmpVector, tmpBounds[0]);
+		inflate_mesh(model_mesh, tmpVector, geomCenter, scaleFactor, step);
+	}
+	else if (mesh_type == BOUNDING_SPHERE) {
+		generate_tinySPHERE_mesh(tmpBounds, geomCenter, epsilon, SUBDIV_DEPTH);
+		convert_toMatrix(tmpVector, tmpBounds[0]);
+		inflate_mesh(model_mesh, tmpVector, geomCenter, scaleFactor, step);
+	}
+	else if (mesh_type == SUB_MESH) {
+		generate_SUBSAMPLE_mesh(tmpBounds, model_mesh, DETER_SUBSAMPLE);
+		convert_toMatrix(tmpVector, tmpBounds[0]);
+	}
+
+	delete[] geomCenter;
+	bounding_mesh = tmpVector;
 }
 
 void fitMesh_from_orig_Model_LEGACY_GL(std::vector<std::vector<std::vector<GLfloat>>>& vertices,
@@ -425,8 +464,7 @@ void find_max_min_Coords_vals(std::vector<std::vector<GLfloat>>& box,
 	GLfloat min_Y = box[0][1];
 	GLfloat min_Z = box[0][2];
 
-	std::vector<std::vector<GLfloat>>::iterator v = box.begin();
-	while (v != box.end()) {
+	for(auto v = box.begin(); v != box.end(); ++v) {
 		std::vector<GLfloat> vertex = *v;
 		if (vertex[0] > max_X) { max_X = vertex[0]; }
 		if (vertex[1] > max_Y) { max_Y = vertex[1]; }
@@ -435,7 +473,6 @@ void find_max_min_Coords_vals(std::vector<std::vector<GLfloat>>& box,
 		if (vertex[0] < min_X) { min_X = vertex[0]; }
 		if (vertex[1] < min_Y) { min_Y = vertex[1]; }
 		if (vertex[2] < min_Z) { min_Z = vertex[2]; }
-		v++;
 	}
 
 	x = max_X;
@@ -572,14 +609,14 @@ void project_3D_along_axis(std::vector<std::vector<GLfloat>>& obj,
 	std::vector<GLfloat>& axis,
 	std::vector<std::vector<GLfloat>>& proj) {
 
-	std::vector<std::vector<GLfloat>>::iterator v_obj = obj.begin();
-	while (v_obj != obj.end()) {
+	std::vector<std::vector<GLfloat>> tmpProj;
+	for(auto v_obj = obj.begin(); v_obj != obj.end(); ++v_obj) {
 		std::vector<GLfloat> res = axis;
 		GLfloat scalar_product = scalar_mult(*v_obj, axis);
 		scale_3Dvectors(res, scalar_product);
-		proj.push_back(res);
-		v_obj++;
+		tmpProj.push_back(res);
 	}
+	proj = tmpProj;
 }
 
 float dist_sq_vec(std::vector<GLfloat>& p1, std::vector<GLfloat>& p2) {
@@ -594,8 +631,7 @@ void find_Min_Max_line(std::vector<std::vector<GLfloat>>& line, float& min, floa
 	std::vector<GLfloat> cannon_axis_cent = { 0, 0, 0 };
 	float max_sq = 0.0;
 	float min_sq = dist_sq_vec(cannon_axis_cent, line[0]);
-	std::vector<std::vector<GLfloat>>::iterator v = line.begin();
-	while (v != line.end()) {
+	for(auto v = line.begin(); v != line.end(); ++v) {
 		float v_dist_sq = dist_sq_vec(cannon_axis_cent, *v);
 		if (v_dist_sq > max_sq) { 
 			max_sq = v_dist_sq;
@@ -636,8 +672,7 @@ bool detect_collision_CONVEX_vs_CONVEX_or_SPHERE(std::vector<std::vector<GLfloat
 	face_norms.insert(face_norms.end(), f_norm1.begin(), f_norm1.end());
 	face_norms.insert(face_norms.end(), f_norm2.begin(), f_norm2.end());
 
-	std::vector<std::vector<GLfloat>>::iterator norm = face_norms.begin();
-	while (norm != face_norms.begin()) {
+	for(auto norm = face_norms.begin(); norm != face_norms.end(); ++norm) {
 		if (!check_overlap_along_axis(conv1, conv2, *norm)) { return false; }
 	}
 	return true;
@@ -680,12 +715,10 @@ void default_RigidMass_distribution(Rigid_body* rigidBody) {
 
 	std::vector<GLfloat> mass_distrib;
 	std::vector<std::vector<GLfloat>> bodyPos = rigidBody->bodyPos;
-	std::vector<std::vector<GLfloat>>::iterator v = bodyPos.begin();
 	GLuint mesh_size = (GLuint)bodyPos.size();
 
-	while (v != bodyPos.end()) {
+	for(auto v = bodyPos.begin(); v != bodyPos.end(); ++v) {
 		mass_distrib.push_back((GLfloat)(1 / (GLfloat)mesh_size));
-		v++;
 	}
 	rigidBody->massDistribution = mass_distrib;
 }
@@ -717,8 +750,7 @@ void calc_mass_elem_vec(std::vector<GLfloat>& mass_distrib, GLfloat mass, std::v
 	std::vector<GLfloat> temp_mass_elems;
 	std::vector<GLfloat> mass_dist = mass_distrib;
 
-	std::vector<GLfloat>::iterator prob = mass_dist.begin();
-	while (prob != mass_dist.end()) {
+	for(auto prob = mass_dist.begin(); prob != mass_dist.end(); ++prob) {
 		GLfloat prob_coeff = *prob;
 		temp_mass_elems.push_back(mass * prob_coeff);
 	}
@@ -838,6 +870,8 @@ void calc_AngularMomentum_from_InertiaTensor(Rigid_body* rigidBody) {
 	GLfloat* L_wrld_arr = mult_3D_mat_vec(I, omega);
 	std::vector<GLfloat> L_wrld(L_wrld_arr, L_wrld_arr + 3);
 	rigidBody->angularMomentum = L_wrld;
+
+	delete[] L_wrld_arr;
 }
 
 void calc_AngularVelocity_from_InertiaTensor(Rigid_body* rigidBody) {
@@ -848,6 +882,8 @@ void calc_AngularVelocity_from_InertiaTensor(Rigid_body* rigidBody) {
 	GLfloat* omega_body = mult_3D_mat_vec(inverse_Inertia_tensor, L_wrld);
 	std::vector<GLfloat> omega(omega_body, omega_body + 3);
 	rigidBody->angularVelocity = omega;
+
+	delete[] omega_body;
 }
 
 // velocity calculations from pure forces
@@ -857,12 +893,10 @@ void init_force(Rigid_body* rigidBody) {
 	std::vector<std::vector<GLfloat>> rad_f;
 	std::vector<std::vector<GLfloat>> tan_f;
 	std::vector<std::vector<GLfloat>> body = rigidBody->bodyPos;
-	std::vector<std::vector<GLfloat>>::iterator v_f = body.begin();
 	std::vector<GLfloat> init_v = { 0.0, 0.0, 0.0 };
-	while (v_f != body.end()) {
+	for (auto v_f = body.begin(); v_f != body.end(); ++v_f) {
 		rad_f.push_back(init_v);
 		tan_f.push_back(init_v);
-		v_f++;
 	}
 	rigidBody->Force_distrib_radial = rad_f;
 	rigidBody->Force_distrib_tangent = tan_f;
@@ -995,6 +1029,9 @@ void create_force_axis(Rigid_body* rigidBody,
 
 	center_mass_axis = c_m_axis;
 	tangent_axis = tan_axis;
+
+	delete[] cm_axis;
+	delete[] tang_axis;
 }
 
 void radial_tangent_decomposition(Rigid_body* rigidBody,
@@ -1023,9 +1060,8 @@ void average_radial_force(Rigid_body* rigidBody, std::vector<std::vector<GLfloat
 	std::vector<GLfloat> avg_rad_force = { 0, 0, 0 };
 	std::vector<std::vector<GLfloat>> avg_rad_dist;
 	std::vector<std::vector<GLfloat>> rad_distrib = rigidBody->Force_distrib_radial;
-	std::vector<std::vector<GLfloat>>::iterator rad_v = rad_distrib.begin();
 	int size = (int)rad_distrib.size();
-	while (rad_v != rad_distrib.end()) {
+	for (auto rad_v = rad_distrib.begin(); rad_v != rad_distrib.end(); ++rad_v) {
 		add_3Dvectors(avg_rad_force, *rad_v);
 	}
 	scale_3Dvectors(avg_rad_force, (GLfloat)size);
@@ -1141,11 +1177,9 @@ void init_VelocityElems(Rigid_body* rigidBody) {
 	
 	std::vector<std::vector<GLfloat>> v_e;
 	std::vector<std::vector<GLfloat>> r_d = rigidBody->Force_distrib_radial;
-	std::vector<std::vector<GLfloat>>::iterator v_f = r_d.begin();
 	std::vector<GLfloat> init_v = { 0.0, 0.0, 0.0 };
-	while (v_f != r_d.end()) {
+	for (auto v_f = r_d.begin(); v_f != r_d.end(); ++v_f) {
 		v_e.push_back(init_v);
-		v_f++;
 	}
 	rigidBody->linearVelocityElements = v_e;
 }
@@ -1181,6 +1215,8 @@ void calc_angularAcceleration(Rigid_body* rigid) {
 	GLfloat* ang_acc = mult_3D_mat_vec(I_inv, torqueVec);
 	std::vector<GLfloat> angularAcc(ang_acc, ang_acc + 3);
 	rigid->angularAcceleration = angularAcc;
+
+	delete[] ang_acc;
 }
 
 void calc_angularVelocity_from_acc(Rigid_body* rigid, float time_stamp) {
@@ -1217,9 +1253,9 @@ void linear_position_update(Rigid_body* rigid, float time_stamp) {
 	std::vector<std::vector<GLfloat>> temp_Hpos; 
 	std::vector<std::vector<GLfloat>> position = rigid->bodyPos;
 	std::vector<std::vector<GLfloat>> hitBoxPosition = rigid->hitBoxPos;
-	std::vector<std::vector<GLfloat>>::iterator pos = position.begin();
+
 	int i = 0;
-	while (pos != position.end()) {
+	for (auto pos = position.begin(); pos != position.end(); ++pos) {
 		std::vector<GLfloat> v = linear_v[i];
 		std::vector<GLfloat> p = *pos;
 		std::vector<GLfloat> h_p = hitBoxPosition[i];
@@ -1228,7 +1264,7 @@ void linear_position_update(Rigid_body* rigid, float time_stamp) {
 		add_3Dvectors(h_p, v);
 		temp_pos.push_back(p);
 		temp_Hpos.push_back(h_p);
-		pos++; i++;
+		i++;
 	}
 	rigid->bodyPos = temp_pos;
 	rigid->hitBoxPos = temp_Hpos;
@@ -1272,9 +1308,9 @@ void angular_position_update(Rigid_body* rigid, float time_stamp){
 	std::vector<std::vector<GLfloat>> temp_Hpos;
 	std::vector<std::vector<GLfloat>> position = rigid->bodyPos;
 	std::vector<std::vector<GLfloat>> hitBoxPosition = rigid->hitBoxPos;
-	std::vector<std::vector<GLfloat>>::iterator pos = position.begin();
+
 	int i = 0;
-	while (pos != position.end()) {
+	for (auto pos = position.begin(); pos != position.end(); ++pos) {
 		std::vector<GLfloat> p = *pos;
 		std::vector<GLfloat> h_p = hitBoxPosition[i];
 		std::vector<GLfloat> rot_pos;
@@ -1283,7 +1319,7 @@ void angular_position_update(Rigid_body* rigid, float time_stamp){
 		rotate_vec_along_axis(h_p, theta_t, angular_v, rot_Hpos);
 		temp_pos.push_back(rot_pos);
 		temp_Hpos.push_back(rot_Hpos);
-		pos++; i++;
+		i++;
 	}
 	rigid->bodyPos = temp_pos;
 	rigid->hitBoxPos = temp_Hpos;
@@ -2012,6 +2048,10 @@ std::vector<GLfloat> calc_collision_force(Rigid_body* rigid1, Rigid_body* rigid2
 
 	std::vector<GLfloat> J1 = n1;
 	scale_3Dvectors(J1, J_factor);
+
+	// free memory
+	delete[] a1;
+	delete[] a2;
 	// F = J/dt = J/(te - ti) - for the moment of collision - it is the force.
 	return J1;
 }
@@ -2077,12 +2117,10 @@ void remove_gravity(Rigid_body* rigid) {
 
 	// find radial average gravity
 	std::vector<GLfloat> avg_r = { 0, 0, 0 };
-	std::vector<std::vector<GLfloat>>::iterator v = rad_g.begin();
-	while (v != rad_g.end()) {
+	for (auto v = rad_g.begin(); v != rad_g.end(); ++v) {
 		add_3Dvectors(avg_r, *v);
-		v++;
 	}
-	GLfloat scale = (GLfloat)(1 / ((int)rad_g.size()));
+	GLfloat scale = (GLfloat)(1 / ((GLfloat)rad_g.size()));
 	scale_3Dvectors(avg_r, scale);
 
 	// removing from radial distribution
@@ -2141,7 +2179,7 @@ void loadBody(Rigid_body* rigid, std::vector<std::vector<std::vector<GLfloat>>>&
 
 	std::vector<std::vector<GLfloat>> flatten_b;
 	std::vector<std::vector<GLfloat>> bounds;
-	
+
 	translate_vertices_LEGACY_GL(body, flatten_b);
 	fitMesh(flatten_b, bounds, meshType);
 
@@ -2203,10 +2241,9 @@ void singleRigidBodyPhysics(Rigid_body* currBody,
 	if (applyLinearForce) { addForce(currBody); }
 	
 	// checking for collision - bodyList is without the current body
-	std::vector<Rigid_body>::iterator b = bodyList.begin();
 	int hCtype = currBody->hitBoxType;
 	std::vector<std::vector<GLfloat>> hCmesh = currBody->hitBoxPos;
-	while (b != bodyList.end()) {
+	for(auto b = bodyList.begin(); b != bodyList.end(); ++b) {
 		Rigid_body external_body = *b;
 		convexHull convHull;
 		std::vector<std::vector<GLfloat>> hmesh = external_body.hitBoxPos;
@@ -2225,7 +2262,11 @@ void draw_multipleFlatRigidBodies_LEGACY_GL(std::vector<Rigid_body>& bodies, GLe
 
 	for (auto obj = bodies.begin(); obj != bodies.end(); ++obj) {
 		std::vector<std::vector<GLfloat>> v = obj->bodyPos;
-		draw_flat_obj_LEGACY_GL(v, render_type);
+		std::vector<GLushort> inds = obj->body_indices;
+		std::vector<std::vector<GLfloat>> sorted_vertex;
+
+		sortByIndex(v, inds, sorted_vertex);
+		draw_flat_obj_LEGACY_GL(sorted_vertex, render_type);
 	}
 }
 
@@ -2248,12 +2289,21 @@ void generate_icosahedron_rigidBody_array(std::vector<Rigid_body>& bodyList) {
 		int rand_z = generate_random_number_INT(0, 10);
 		GLfloat center[3] = { (GLfloat)rand_x, (GLfloat)rand_y, (GLfloat)rand_z };
 		generate_tinyCONVEX_mesh(mesh, center, 1);
-		meshObj.push_back(mesh);
-		
+
+		std::vector<GLfloat> v_mesh = mesh[0];
+		std::vector<GLfloat> ind_float = mesh[1];
+
+		std::vector<std::vector<GLfloat>> vertexVector;
+		convert_toMatrix(vertexVector, v_mesh);
+		meshObj.push_back(vertexVector);
+
+		std::vector<GLushort> inds(ind_float.begin(), ind_float.end());
 
 		Rigid_body body;
+		body.body_indices = inds;
 		initiate_physics(&body, meshObj, p_z, false, massD, 50, BOUNDING_BOX);
 		bodyL.push_back(body);
+		i++;
 	}
 	bodyList = bodyL;
 }

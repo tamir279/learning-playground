@@ -34,28 +34,6 @@ void initGlew(void) {
 
 std::vector<Rigid_body> bodyList;
 
-// for a demo
-void systemPhysicsLoop(int val) {
-	// display bodies & scene - from model_draw. TODO in *MODEL_DRAW* - to create a function that draws multiple bodies
-	//loop over all to check for collisions and update physics
-
-	bool gravityApplied = true;
-	std::vector<bool> applyLinearForce = { false, false, true, true, false };
-
-
-	draw_multipleFlatRigidBodies_LEGACY_GL(bodyList, GL_TRIANGLES);
-
-	int i = 0;
-	for (auto b = bodyList.begin(); b != bodyList.end(); ++b) {
-		Rigid_body body = *b;
-		singleRigidBodyPhysics(&body, bodyList, applyLinearForce[i]);
-		i++; b++;
-	}
-
-	glutTimerFunc(1, systemPhysicsLoop, 0);
-}
-
-
 void init(void) {
 	generate_icosahedron_rigidBody_array(bodyList);
 	init_scene_params_LEGACY_GL(fogMode, shade_mode);
@@ -65,6 +43,29 @@ void display(void) {
 
 	display_scene_obj();
 	draw_multipleFlatRigidBodies_LEGACY_GL(bodyList, GL_TRIANGLES);
+	glPopMatrix();
+	glFlush();
+	glutSwapBuffers();
+}
+
+// for a demo
+void systemPhysicsLoop(int val) {
+	// display bodies & scene - from model_draw. TODO in *MODEL_DRAW* - to create a function that draws multiple bodies
+	//loop over all to check for collisions and update physics
+
+	bool gravityApplied = true;
+	std::vector<bool> applyLinearForce = { false, false, true, true, false };
+
+	display();
+
+	int i = 0;
+	for (auto b = bodyList.begin(); b != bodyList.end(); ++b) {
+		Rigid_body body = *b;
+		singleRigidBodyPhysics(&body, bodyList, applyLinearForce[i]);
+		i++; b++;
+	}
+
+	glutTimerFunc(1, systemPhysicsLoop, 0);
 }
 
 void sceneReshape(int w, int h) {
@@ -90,19 +91,13 @@ int main(int argc, char** argv)
 	glutCreateWindow("3D textures and lighted model");
 	initGlew();
 	init();
+	std::cout << "\n" << "i'm here!!" << "\n";
 	glutDisplayFunc(display);
+	std::cout << "\n" << "i'm here!!" << "\n";
 	glutReshapeFunc(sceneReshape);
+	std::cout << "\n" << "i'm here!!" << "\n";
 	systemPhysicsLoop(0);
+	std::cout << "\n" << "i'm here!!" << "\n";
 	glutMainLoop();
 }
 
-// Run program: Ctrl + F5 or Debug > Start Without Debugging menu
-// Debug program: F5 or Debug > Start Debugging menu
-
-// Tips for Getting Started: 
-//   1. Use the Solution Explorer window to add/manage files
-//   2. Use the Team Explorer window to connect to source control
-//   3. Use the Output window to see build output and other messages
-//   4. Use the Error List window to view errors
-//   5. Go to Project > Add New Item to create new code files, or Project > Add Existing Item to add existing code files to the project
-//   6. In the future, to open this project again, go to File > Open > Project and select the .sln file

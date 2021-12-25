@@ -15,9 +15,10 @@
 
 // creating collision box
 void translate_vertices_LEGACY_GL(std::vector<std::vector<std::vector<GLfloat>>>& vertices_per_object, std::vector<std::vector<GLfloat>>& vertex_vec);
-void sortByIndex(GLfloat vertex_data[], GLushort index[], int ISIZE, std::vector<std::vector<GLfloat>>& vertex_vec);
+void sortByIndex(std::vector<std::vector<GLfloat>>& mesh, std::vector<GLushort>& ind_arr, std::vector<std::vector<GLfloat>>& sorted);
 void generate_tinyBOX_mesh(std::vector<std::vector<GLfloat>>& vertex_vec, GLfloat center[], GLfloat epsilon);
 void generate_tinyCONVEX_mesh(std::vector<std::vector<GLfloat>>& mesh, GLfloat center[], GLfloat epsilon);
+void convert_toMatrix(std::vector<std::vector<GLfloat>>& vertexVector, std::vector<GLfloat>& longVec);
 float fast_sqrt(float num);
 void normalize(float v[3]);
 void PolygonSubdivision(float* v1, float* v2, float* v3, long depth, std::vector<std::vector<GLfloat>>& mesh);
@@ -60,8 +61,10 @@ class col_detect;
 typedef struct rigidBodyParams {
 	// geometric data
 	std::vector<std::vector<GLfloat>>              bodyPos;
+	std::vector<GLushort>                          body_indices;
 	std::vector<int>                               body_polygon_size;
 	std::vector<std::vector<GLfloat>>              hitBoxPos;
+	std::vector<GLushort>                          hitbox_indices;
 	std::vector<GLfloat>                           collisionPosition;
 	std::vector<std::vector<GLfloat>>              rotation_LEGACY_GL;
 
@@ -150,7 +153,7 @@ void GJK_shortest_dst_pt(std::vector<std::vector<GLfloat>>& mink_diff, std::vect
 void GJK_MinimumNormLine(std::vector<std::vector<GLfloat>>& simplex, std::vector<GLfloat>& pt);
 
 /* create a convexHull */
-typedef struct {
+typedef struct conv{
 	std::vector<std::vector<GLfloat>> simplex;
 	int simplexSize = 0;
 	std::vector<std::vector<std::vector<GLfloat>>> convexHullPoints;
