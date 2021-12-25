@@ -62,7 +62,7 @@ void systemPhysicsLoop(int val) {
 	for (auto b = bodyList.begin(); b != bodyList.end(); ++b) {
 		Rigid_body body = *b;
 		singleRigidBodyPhysics(&body, bodyList, applyLinearForce[i]);
-		i++; b++;
+		i++;
 	}
 
 	glutTimerFunc(1, systemPhysicsLoop, 0);
