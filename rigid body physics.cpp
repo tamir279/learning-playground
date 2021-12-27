@@ -845,22 +845,73 @@ GLfloat* mult_3D_mat_vec(std::vector<std::vector<GLfloat>>& mat, std::vector<GLf
 	return _r_res;
 }
 
+
+/*
+A-1 = (1/det(A))(det(a22, a23,  det(a13, a12,  det(a12, a13 
+                     a32, a33),     a33, a32),     a22, a23)
+			     det(a23, a21,  det(a11, a13,  det(a13, a11
+				     a33, a31),     a31, a33)      a23, a21)
+				 det(a21, a22,  det(a12, a11,  det(a11, a12,
+				     a31, a32),     a32, a31),     a21, a22))
+
+det2D(a1, a2,   = a1*a4 - a2*a3
+      a3, a4) 
+
+det3D(a11 a12 a13   =  a11*det2D(a22, a23,  - a12*det2D(a21, a23,  + a13*det2D(a21, a22, 
+      a21, a22, a23              a32, a33)              a31, a33)              a31, a32)
+	  a31, a32, a33)
+*/
+
+GLfloat det2D(std::vector<std::vector<GLfloat>>& subA) {
+	return subA[0][0] * subA[1][1] - subA[0][1] * subA[1][0];
+}
+
+GLfloat det3D(std::vector<std::vector<GLfloat>>& A) {
+	std::vector<std::vector<GLfloat>> minorA1 = { {A[1][1], A[1][2]}, {A[2][1], A[2][2]} };
+	std::vector<std::vector<GLfloat>> minorA2 = { {A[1][0], A[1][2]}, {A[2][0], A[2][2]} };
+	std::vector<std::vector<GLfloat>> minorA3 = { {A[1][0], A[1][1]}, {A[2][0], A[2][1]} };
+	GLfloat minorA1determinant = det2D(minorA1);
+	GLfloat minorA2determinant = det2D(minorA2);
+	GLfloat minorA3determinant = det2D(minorA3);
+
+	return A[0][0] * minorA1determinant - A[0][1] * minorA2determinant + A[0][2] * minorA3determinant;
+}
+
 bool calc_3D_inverse_mat(std::vector<std::vector<GLfloat>>& A, std::vector<std::vector<GLfloat>>& I_A) {
-	GLfloat d = 0.0;
-	std::vector<std::vector<GLfloat>> temp_I_A;
-	// finding determinant
-	for (int i = 0; i < 3; i++) {
-		d += A[0][i] * (A[1][(i + 1) % 3] * A[2][(i + 2) % 3] - A[1][(i + 2) % 3] * A[2][(i + 1) % 3]);
-	}
+
+	std::vector<std::vector<GLfloat>> tmpIA(3, std::vector<GLfloat>(3, 0));
+	GLfloat d = det3D(A);
+
 	if (d == 0.0) {
 		return false;
 	}
-	for (int i = 0; i < 3; i++) {
-		for (int j = 0; j < 3; j++)
-			temp_I_A[i].push_back(((A[(j + 1) % 3][(i + 1) % 3] * A[(j + 2) % 3][(i + 2) % 3])
-				- (A[(j + 1) % 3][(i + 2) % 3] * A[(j + 2) % 3][(i + 1) % 3])) / d);
+	else {
+		std::vector<std::vector<GLfloat>> minor1 = { {A[1][1], A[1][2]}, {A[2][1], A[2][2]} };
+		std::vector<std::vector<GLfloat>> minor2 = { {A[0][2], A[0][1]}, {A[2][2], A[2][1]} };
+		std::vector<std::vector<GLfloat>> minor3 = { {A[0][1], A[0][2]}, {A[1][1], A[1][2]} };
+
+		std::vector<std::vector<GLfloat>> minor4 = { {A[1][2], A[1][0]}, {A[2][2], A[2][0]} };
+		std::vector<std::vector<GLfloat>> minor5 = { {A[0][0], A[0][2]}, {A[2][0], A[2][2]} };
+		std::vector<std::vector<GLfloat>> minor6 = { {A[0][2], A[0][0]}, {A[1][2], A[1][0]} };
+
+		std::vector<std::vector<GLfloat>> minor7 = { {A[1][0], A[1][1]}, {A[2][0], A[2][1]} };
+		std::vector<std::vector<GLfloat>> minor8 = { {A[0][1], A[0][0]}, {A[2][1], A[2][0]} };
+		std::vector<std::vector<GLfloat>> minor9 = { {A[0][0], A[0][1]}, {A[1][0], A[1][1]} };
+
+		tmpIA[0][0] = det2D(minor1) / d;
+		tmpIA[0][1] = det2D(minor2) / d;
+		tmpIA[0][2] = det2D(minor3) / d;
+
+		tmpIA[1][0] = det2D(minor4) / d;
+		tmpIA[1][1] = det2D(minor5) / d;
+		tmpIA[1][2] = det2D(minor6) / d;
+
+		tmpIA[2][0] = det2D(minor7) / d;
+		tmpIA[2][1] = det2D(minor8) / d;
+		tmpIA[2][2] = det2D(minor9) / d;
+
+		I_A = tmpIA;
 	}
-	I_A = temp_I_A;
 	return true;
 }
 
@@ -944,6 +995,7 @@ void distrib_force_to_polygon(std::vector<GLfloat>& force,
 			f_dist.push_back(v);
 		}
 		else { f_dist.push_back({ 0.0, 0.0, 0.0 }); }
+		i++;
 	}
 	force_distrib = f_dist;
 
@@ -1050,6 +1102,7 @@ void radial_tangent_decomposition(Rigid_body* rigidBody,
 		create_force_axis(rigidBody, body[i], force_distrib[i], c_m_axis, tan_axis);
 		add_3Dvectors(rad_f[i], c_m_axis);
 		add_3Dvectors(tan_f[i], tan_axis);
+		i++;
 	}
 	r = rad_f;
 	t = tan_f;
@@ -1109,20 +1162,20 @@ void remove_force(Rigid_body* rigidBody,
 	// recovering average radial
 	int i = 0;
 	while (i < (int)rad.size()) {
-		add_3Dvectors(avg_r, rad[i]);
+		add_3Dvectors(avg_r, rad[i]); i++;
 	}
 	scale_3Dvectors(avg_r, (int)rad.size());
 
 	// removing from radial distribution
 	int i1 = 0;
 	while (i1 < (int)r.size()) {
-		subtr_3Dvectors(r[i1], avg_r);
+		subtr_3Dvectors(r[i1], avg_r); i1++;
 	}
 
 	// removing from the tangent force distribution
 	int i2 = 0;
 	while (i2 < (int)t.size()) {
-		subtr_3Dvectors(t[i2], tang[i2]);
+		subtr_3Dvectors(t[i2], tang[i2]); i2++;
 	}
 
 	rigidBody->Force_distrib_radial = r;
@@ -1246,6 +1299,18 @@ void calc_angular_velocity_elems(Rigid_body* rigid, float time_stamp) {
 	rigid->tangentVelocityElements = v_elems;
 }
 
+void calculate_average_centerMassVelocity(std::vector<GLfloat>& avgV, std::vector<std::vector<GLfloat>>& velocityElements) {
+	int numElements = (int)velocityElements.size();
+	std::vector<GLfloat> v = { 0.0, 0.0, 0.0 };
+	for (auto element = velocityElements.begin(); element != velocityElements.end(); ++element) {
+		add_3Dvectors(v, *element);
+	}
+	GLfloat scale = (GLfloat)(1) / (GLfloat)numElements;
+	scale_3Dvectors(v, scale);
+
+	avgV = v;
+}
+
 void linear_position_update(Rigid_body* rigid, float time_stamp) {
 
 	std::vector<std::vector<GLfloat>> linear_v = rigid->linearVelocityElements;
@@ -1254,16 +1319,22 @@ void linear_position_update(Rigid_body* rigid, float time_stamp) {
 	std::vector<std::vector<GLfloat>> position = rigid->bodyPos;
 	std::vector<std::vector<GLfloat>> hitBoxPosition = rigid->hitBoxPos;
 
+	std::vector<GLfloat> avgV;
+	calculate_average_centerMassVelocity(avgV, linear_v);
+
 	int i = 0;
 	for (auto pos = position.begin(); pos != position.end(); ++pos) {
 		std::vector<GLfloat> v = linear_v[i];
 		std::vector<GLfloat> p = *pos;
-		std::vector<GLfloat> h_p = hitBoxPosition[i];
 		scale_3Dvectors(v, (GLfloat)time_stamp);
 		add_3Dvectors(p, v);
-		add_3Dvectors(h_p, v);
 		temp_pos.push_back(p);
-		temp_Hpos.push_back(h_p);
+
+		if (i < (int)hitBoxPosition.size()) {
+			std::vector<GLfloat> h_p = hitBoxPosition[i];
+			add_3Dvectors(h_p, avgV);
+			temp_Hpos.push_back(h_p);
+		}
 		i++;
 	}
 	rigid->bodyPos = temp_pos;
@@ -1312,13 +1383,16 @@ void angular_position_update(Rigid_body* rigid, float time_stamp){
 	int i = 0;
 	for (auto pos = position.begin(); pos != position.end(); ++pos) {
 		std::vector<GLfloat> p = *pos;
-		std::vector<GLfloat> h_p = hitBoxPosition[i];
 		std::vector<GLfloat> rot_pos;
-		std::vector<GLfloat> rot_Hpos;
 		rotate_vec_along_axis(p, theta_t, angular_v, rot_pos);
-		rotate_vec_along_axis(h_p, theta_t, angular_v, rot_Hpos);
 		temp_pos.push_back(rot_pos);
-		temp_Hpos.push_back(rot_Hpos);
+
+		if (i < (int)hitBoxPosition.size()) {
+			std::vector<GLfloat> rot_Hpos;
+			std::vector<GLfloat> h_p = hitBoxPosition[i];
+			rotate_vec_along_axis(h_p, theta_t, angular_v, rot_Hpos);
+			temp_Hpos.push_back(rot_Hpos);
+		}
 		i++;
 	}
 	rigid->bodyPos = temp_pos;
@@ -2079,6 +2153,7 @@ void setGravity(Rigid_body* rigid, std::vector<std::vector<GLfloat>>& G_distrib)
 		std::vector<GLfloat> G_elem;
 		gravityElem(rigid, m_d[i], G_elem);
 		G_d.push_back(G_elem);
+		i++;
 	}
 	G_distrib = G_d;
 }
@@ -2126,13 +2201,13 @@ void remove_gravity(Rigid_body* rigid) {
 	// removing from radial distribution
 	int i1 = 0;
 	while (i1 < (int)r.size()) {
-		subtr_3Dvectors(r[i1], avg_r);
+		subtr_3Dvectors(r[i1], avg_r); i1++;
 	}
 
 	// removing from the tangent force distribution
 	int i2 = 0;
 	while (i2 < (int)t.size()) {
-		subtr_3Dvectors(t[i2], tang_g[i2]);
+		subtr_3Dvectors(t[i2], tang_g[i2]); i2++;
 	}
 
 	rigid->Force_distrib_radial = r;

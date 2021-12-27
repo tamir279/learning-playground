@@ -117,6 +117,8 @@ GLfloat calc_I_by_coords(GLfloat mass_elem, std::vector<GLfloat>& v, GLint c[3])
 GLfloat calc_I_elem(Rigid_body* rigidBody, GLint coords[3]);
 void calc_Inertia_tensor(Rigid_body* rigidBody);
 GLfloat* mult_3D_mat_vec(std::vector<std::vector<GLfloat>>& mat, std::vector<GLfloat>& vec);
+GLfloat det2D(std::vector<std::vector<GLfloat>>& subA);
+GLfloat det3D(std::vector<std::vector<GLfloat>>& A);
 bool calc_3D_inverse_mat(std::vector<std::vector<GLfloat>>& A, std::vector<std::vector<GLfloat>>& I_A);
 void calc_AngularMomentum_from_InertiaTensor(Rigid_body* rigidBody);
 void calc_AngularVelocity_from_InertiaTensor(Rigid_body* rigidBody);
@@ -140,6 +142,7 @@ void calc_torque(Rigid_body* rigid);
 void calc_angularAcceleration(Rigid_body* rigid);
 void calc_angularVelocity_from_acc(Rigid_body* rigid, float time_stamp);
 void calc_angular_velocity_elems(Rigid_body* rigid, float time_stamp);
+void calculate_average_centerMassVelocity(std::vector<GLfloat>& avgV, std::vector<std::vector<GLfloat>>& velocityElements);
 void linear_position_update(Rigid_body* rigid, float time_stamp);
 void rotate_vec_along_axis(std::vector<GLfloat>& v, GLfloat rot_angle, std::vector<GLfloat>& rot_axis, std::vector<GLfloat>& res);
 float approx_dist_vec(std::vector<GLfloat>& v);
