@@ -2214,7 +2214,7 @@ void remove_gravity(Rigid_body* rigid) {
 	rigid->Force_distrib_tangent = t;
 
 	std::vector<std::vector<std::vector<GLfloat>>> f = rigid->Force_distribContainer;
-	f.erase(f.end());
+	f.erase(f.end() - 1);
 	rigid->Force_distribContainer = f;
 
 }
@@ -2325,6 +2325,7 @@ void singleRigidBodyPhysics(Rigid_body* currBody,
 		int htype = external_body.hitBoxType;
 		if (detectCollisions(hCtype, htype, hCmesh, hmesh)) {
 			detectAndFindCollisionPoint(currBody, &external_body, &convHull, true);
+			// problem here!
 			std::vector<GLfloat> f1 = calc_collision_force(currBody, &external_body);
 			std::vector<GLfloat> init1 = currBody->collisionPosition;
 			apply_continous_force(currBody, init1, f1, 1, DT);
