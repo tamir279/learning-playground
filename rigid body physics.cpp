@@ -980,21 +980,35 @@ void distrib_force_to_polygon(std::vector<GLfloat>& force,
 	std::vector<std::vector<GLfloat>> f_dist;
 	std::vector<int> poly = rigidBody->body_polygon_size;
 	std::vector<std::vector<GLfloat>> body = rigidBody->bodyPos;
+	std::vector<GLushort> inds = rigidBody->body_indices;
+
 	int min_ind, max_ind;
 	find_poly_interval(poly, min_poly, min_ind, max_ind);
 	// the colsest point gets 60% of the force distributed to, the other points get equal distribution
 	GLfloat cl_scale = 0.6;
-	int inv_res = max_ind - min_ind + 1;
+	int inv_res = max_ind - min_ind;
 	GLfloat surr_scale = 0.4 / (GLfloat)(inv_res);
+
+	std::vector<int> forcePolygon;
+	for (int i = min_ind; i <= max_ind; i++) {
+		forcePolygon.push_back(inds[i]);
+	}
+
 	int i = 0;
+	bool foundPoly = false;
 	while (i < (int)body.size()) {
-		if (i >= min_ind && i <= max_ind) {
-			std::vector<GLfloat> v = force;
-			if (i == closest_point) { scale_3Dvectors(v, cl_scale); }
-			else{ scale_3Dvectors(v, surr_scale); }
-			f_dist.push_back(v);
+		for (auto k = forcePolygon.begin(); k != forcePolygon.end(); ++k) {
+			if (i == *k) {
+				foundPoly = true;
+				std::vector<GLfloat> v = force;
+				if (i == inds[closest_point]) { scale_3Dvectors(v, cl_scale); }
+				else { scale_3Dvectors(v, surr_scale); }
+				f_dist.push_back(v);
+				break;
+			}
+			else { foundPoly = false; }
 		}
-		else { f_dist.push_back({ 0.0, 0.0, 0.0 }); }
+		if(!foundPoly){ f_dist.push_back({ 0.0, 0.0, 0.0 }); }
 		i++;
 	}
 	force_distrib = f_dist;
@@ -1005,6 +1019,11 @@ void find_init_pt_onBody(Rigid_body* rigidBody, std::vector<GLfloat>& init_force
 
 	std::vector<std::vector<GLfloat>> body = rigidBody->bodyPos;
 	std::vector<int> poly = rigidBody->body_polygon_size;
+	std::vector<GLushort> inds = rigidBody->body_indices;
+
+	std::vector<std::vector<GLfloat>> expendedBodyMesh;
+	expandMesh(body, inds, expendedBodyMesh);
+
 	int j = 0;
 	int lim = poly[0];
 	float min_dist_sq = dist_sq_vec(init_force_pt, body[0]);
@@ -1013,7 +1032,7 @@ void find_init_pt_onBody(Rigid_body* rigidBody, std::vector<GLfloat>& init_force
 	int c = 0;
 	for (int i = 0; i < (int)poly.size(); i++) {
 		while (j < lim) {
-			float sq_dist = dist_sq_vec(init_force_pt, body[j]);
+			float sq_dist = dist_sq_vec(init_force_pt, expendedBodyMesh[j]);
 			if (sq_dist < min_dist_sq) {
 				min_dist_sq = sq_dist;
 				m = i;
@@ -1025,7 +1044,7 @@ void find_init_pt_onBody(Rigid_body* rigidBody, std::vector<GLfloat>& init_force
 	}
 
 	min_poly = m;
-	closest = c;
+	closest = inds[c];
 }
 
 void distrib_force_to_mass_elems(Rigid_body* rigidBody,
@@ -1183,8 +1202,8 @@ void remove_force(Rigid_body* rigidBody,
 
 	std::vector<std::vector<std::vector<GLfloat>>> f = rigidBody->Force_distribContainer;
 	std::vector<std::vector<GLfloat>> init = rigidBody->initPts;
-	f.erase(f.end());
-	init.erase(init.end());
+	f.erase(f.end() - 1);
+	init.erase(init.end() - 1);
 	rigidBody->Force_distribContainer = f;
 	rigidBody->initPts = init;
 
@@ -1911,10 +1930,31 @@ bool recoverPoinTofCollision(Rigid_body* rigid1, Rigid_body* rigid2, std::vector
 	return false;
 }
 
-bool detectCollisions(int hit_box1,
+void expandMesh(std::vector<std::vector<GLfloat>>& mesh,
+	std::vector<GLushort> indices,
+	std::vector<std::vector<GLfloat>>& expendedMesh) {
+	
+	std::vector<std::vector<GLfloat>> tmpMesh;
+	for (auto i = indices.begin(); i != indices.end(); ++i) {
+		tmpMesh.push_back(mesh[*i]);
+	}
+	expendedMesh = tmpMesh;
+}
+
+bool detectCollisions(Rigid_body* body1,
+	Rigid_body* body2,
+	int hit_box1,
 	int hit_box2,
 	std::vector<std::vector<GLfloat>>& hitMesh1,
 	std::vector<std::vector<GLfloat>>& hitMesh2) {
+
+	std::vector<GLushort> indices1 = body1->hitbox_indices;
+	std::vector<GLushort> indices2 = body2->hitbox_indices;
+
+	std::vector<std::vector<GLfloat>> expendedH1;
+	std::vector<std::vector<GLfloat>> expendedH2;
+	expandMesh(hitMesh1, indices1, expendedH1);
+	expandMesh(hitMesh2, indices2, expendedH2);
 
 	col_detect col_obj;
 	bool r = false;
@@ -1937,13 +1977,13 @@ bool detectCollisions(int hit_box1,
 		(hit_box1 == SUB_MESH && hit_box2 == SUB_MESH) ||
 		(hit_box1 == SUB_MESH && hit_box2 == BOUNDING_CONVEX) ||
 		(hit_box2 == SUB_MESH && hit_box1 == BOUNDING_CONVEX)) {
-		if (col_obj.detect_CONVEX_CONVEX_or_SPHERE(hitMesh1, hitMesh2)) { r = true; }
+		if (col_obj.detect_CONVEX_CONVEX_or_SPHERE(expendedH1, expendedH1)) { r = true; }
 	}
 	else if ((hit_box1 == SUB_MESH && hit_box2 == BOUNDING_BOX) ||
 		(hit_box2 == SUB_MESH && hit_box1 == BOUNDING_BOX) ||
 		(hit_box1 == SUB_MESH && hit_box2 == BOUNDING_SPHERE) ||
 		(hit_box2 == SUB_MESH && hit_box1 == BOUNDING_SPHERE)) {
-		if (col_obj.detect_CONVEX_CONVEX_or_SPHERE(hitMesh1, hitMesh2)) { r = true; }
+		if (col_obj.detect_CONVEX_CONVEX_or_SPHERE(expendedH1, expendedH1)) { r = true; }
 	}
 	return r;
 }
@@ -2306,7 +2346,8 @@ void addForce(Rigid_body* rigid) {
 // general structure , what is written NOW is for a test
 void singleRigidBodyPhysics(Rigid_body* currBody,
 	std::vector<Rigid_body>& bodyList,
-	bool applyLinearForce) {
+	bool applyLinearForce,
+	int bodyIndex) {
 
 	// apply gravity
 	if(currBody->gravityApplied){ apply_continous_gravity(currBody, 1, DT); }
@@ -2317,19 +2358,24 @@ void singleRigidBodyPhysics(Rigid_body* currBody,
 	
 	// checking for collision - bodyList is without the current body
 	int hCtype = currBody->hitBoxType;
+	int rigidIndex = 0;
 	std::vector<std::vector<GLfloat>> hCmesh = currBody->hitBoxPos;
 	for(auto b = bodyList.begin(); b != bodyList.end(); ++b) {
-		Rigid_body external_body = *b;
-		convexHull convHull;
-		std::vector<std::vector<GLfloat>> hmesh = external_body.hitBoxPos;
-		int htype = external_body.hitBoxType;
-		if (detectCollisions(hCtype, htype, hCmesh, hmesh)) {
-			detectAndFindCollisionPoint(currBody, &external_body, &convHull, true);
-			// problem here!
-			std::vector<GLfloat> f1 = calc_collision_force(currBody, &external_body);
-			std::vector<GLfloat> init1 = currBody->collisionPosition;
-			apply_continous_force(currBody, init1, f1, 1, DT);
+		Rigid_body external_body;
+		if (rigidIndex != bodyIndex) {
+			external_body = *b;
+			convexHull convHull;
+			std::vector<std::vector<GLfloat>> hmesh = external_body.hitBoxPos;
+			int htype = external_body.hitBoxType;
+			if (detectCollisions(currBody, &external_body, hCtype, htype, hCmesh, hmesh)) {
+				detectAndFindCollisionPoint(currBody, &external_body, &convHull, true);
+				// problem here!
+				std::vector<GLfloat> f1 = calc_collision_force(currBody, &external_body);
+				std::vector<GLfloat> init1 = currBody->collisionPosition;
+				apply_continous_force(currBody, init1, f1, 1, DT);
+			}
 		}
+		rigidIndex++;
 	}
 }
 

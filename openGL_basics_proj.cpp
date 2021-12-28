@@ -20,6 +20,12 @@
 static GLint fogMode;
 GLenum shade_mode = GL_SMOOTH;
 
+GLfloat x_translation = 0.0;
+GLfloat y_translation = 0.0;
+GLfloat z_translation = 0.0;
+
+std::vector<GLfloat> init_pt = { 3.0, 6.0, 7.0 };
+
 // initialize glew
 void initGlew(void) {
 	GLenum err = glewInit();
@@ -40,8 +46,8 @@ void init(void) {
 }
 
 void display(void) {
-
-	display_scene_obj();
+	std::vector<GLfloat> keyboardMovement = { init_pt[0] + x_translation, init_pt[1] + y_translation, init_pt[2] + z_translation };
+	display_scene_obj(keyboardMovement);
 	draw_multipleFlatRigidBodies_LEGACY_GL(bodyList, GL_TRIANGLES);
 	glPopMatrix();
 	glFlush();
@@ -60,8 +66,7 @@ void systemPhysicsLoop(int val) {
 
 	int i = 0;
 	for (auto b = bodyList.begin(); b != bodyList.end(); ++b) {
-		Rigid_body body = *b;
-		singleRigidBodyPhysics(&body, bodyList, applyLinearForce[i]);
+		singleRigidBodyPhysics(&(*b), bodyList, applyLinearForce[i], i);
 		i++;
 	}
 
@@ -77,8 +82,39 @@ void sceneReshape(int w, int h) {
 	glFrustum(-1.0, 1.0, -1.0, 1.0, 1.5, 50.0);
 	glMatrixMode(GL_MODELVIEW);
 	// modelview matrix
-	gluLookAt(3.0, 6.0, 7.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+	gluLookAt(init_pt[0], init_pt[1], init_pt[2], 0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
 }
+
+void keyboard(unsigned char key, int x, int y) {
+	switch (key) {
+	case 'a':
+		x_translation += 0.02;
+		glutPostRedisplay();
+		break;
+	case 'd':
+		x_translation -= 0.02;
+		glutPostRedisplay();
+		break;
+	case 's':
+		z_translation -= 0.02;
+		glutPostRedisplay();
+		break;
+	case 'w':
+		z_translation += 0.02;
+		glutPostRedisplay();
+	case 'e':
+		y_translation += 0.02;
+		glutPostRedisplay();
+		break;
+	case 'q':
+		y_translation -= 0.02;
+		glutPostRedisplay();
+		break;
+	default:
+		break;
+	}
+}
+
 
 int main(int argc, char** argv)
 {
@@ -91,13 +127,10 @@ int main(int argc, char** argv)
 	glutCreateWindow("3D textures and lighted model");
 	initGlew();
 	init();
-	std::cout << "\n" << "i'm here!!" << "\n";
 	glutDisplayFunc(display);
-	std::cout << "\n" << "i'm here!!" << "\n";
 	glutReshapeFunc(sceneReshape);
-	std::cout << "\n" << "i'm here!!" << "\n";
+	glutKeyboardFunc(keyboard);
 	systemPhysicsLoop(0);
-	std::cout << "\n" << "i'm here!!" << "\n";
 	glutMainLoop();
 }
 
