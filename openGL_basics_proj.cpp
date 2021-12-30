@@ -16,6 +16,7 @@
 #include "obj_model_read_write.h"
 #include "rigid_body_physics.h"
 #include "model_draw.h"
+#include "random_terrain_generator.h"
 
 static GLint fogMode;
 GLenum shade_mode = GL_SMOOTH;
@@ -39,15 +40,20 @@ void initGlew(void) {
 }
 
 std::vector<Rigid_body> bodyList;
+renderDataContainer surface;
 
 void init(void) {
 	generate_icosahedron_rigidBody_array(bodyList);
 	init_scene_params_LEGACY_GL(fogMode, shade_mode);
+	surface = generateNoisySurface(-3.0, -3.0, 3.0, 3.0, 0.0, 3.2);
 }
 
 void display(void) {
 	std::vector<GLfloat> keyboardMovement = { init_pt[0] + x_translation, init_pt[1] + y_translation, init_pt[2] + z_translation };
 	display_scene_obj(keyboardMovement);
+	glPushMatrix();
+	drawNoisySurface_LEGACY_GL(surface);
+	glPopMatrix();
 	draw_multipleFlatRigidBodies_LEGACY_GL(bodyList, GL_TRIANGLES);
 	glPopMatrix();
 	glFlush();
@@ -60,7 +66,7 @@ void systemPhysicsLoop(int val) {
 	//loop over all to check for collisions and update physics
 
 	bool gravityApplied = true;
-	std::vector<bool> applyLinearForce = { false, false, true, true, false };
+	std::vector<bool> applyLinearForce = { false, false, false, false, false };
 
 	display();
 
