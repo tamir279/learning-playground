@@ -209,15 +209,20 @@ void draw_textured_elements_LEGACY_GL(std::vector<std::vector<std::vector<GLfloa
 
 void init_scene_params_LEGACY_GL(GLint& fogMode, GLenum shade_mode) {
 	GLfloat light_position[] = { 1.0, 1.0, 1.0, 1.0 };
-	GLfloat mat_ambient[] = { 0.9, 0.91, 0.91, 0.1 };
+	GLfloat mat_diffuse[] = { 0.8, 0.6, 0.4, 1.0 };
+	GLfloat mat_ambient[] = { 0.6, 0.5, 0.3, 1.0 };
+	GLfloat mat_shininess[] = { 100 };
 
 	// clear scene and define shading
-	glClearColor(0.0, 0.0, 0.0, 0.0);
+	glClearColor(0.15, 0.15, 0.15, 0.0);
 	//glClearColor(0.2, 0.1, 0.6, 0.0);
 	glShadeModel(shade_mode);
 
+	glMaterialfv(GL_FRONT, GL_DIFFUSE, mat_diffuse);
 	glMaterialfv(GL_FRONT, GL_AMBIENT, mat_ambient);
+	glMaterialfv(GL_FRONT, GL_SHININESS, mat_shininess);
 	glLightfv(GL_LIGHT0, GL_POSITION, light_position);
+	//glLightfv(GL_LIGHT0, GL_AMBIENT, mat_ambient);
 
 	// enabeling lighting
 	glEnable(GL_LIGHTING);
@@ -252,7 +257,8 @@ void display_scene_light_LEGACY_GL(
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glLoadIdentity();
 
-	GLfloat mat_ambient[] = { 0.9, 0.91, 0.91, 0.1 };
+	GLfloat mat_diffuse[] = { 0.8, 0.6, 0.4, 0.1 };
+	GLfloat mat_shininess[] = { 50 };
 
 	glPushMatrix();
 	// starting to operate on vectors
@@ -268,15 +274,19 @@ void display_scene_light_LEGACY_GL(
 	glTranslatef(cam_trans[0], cam_trans[1], cam_trans[2]);
 
 	// rotating the light the light
-	const GLfloat* init_pos = &init_light_pos[0];
+	GLfloat init_pos[] = { 1.0, 1.0, 1.0, 1.0 };
+	GLfloat mat_ambient[] = { 0.6, 0.5, 0.3, 1.0 };
 
 	glPushMatrix();
 	glRotatef(light_rot[0], 1.0, 0.0, 0.0);
 	glRotatef(light_rot[1], 0.0, 1.0, 0.0);
 	glRotatef(light_rot[2], 0.0, 0.0, 1.0);
 	glTranslatef(light_trans[0], light_trans[1], light_trans[2]);
+	glMaterialfv(GL_FRONT, GL_DIFFUSE, mat_diffuse);
 	glMaterialfv(GL_FRONT, GL_AMBIENT, mat_ambient);
+	glMaterialfv(GL_FRONT, GL_SHININESS, mat_shininess);
 	glLightfv(GL_LIGHT0, GL_POSITION, init_pos);
+	//glLightfv(GL_LIGHT0, GL_AMBIENT, mat_ambient);
 	glPopMatrix();
 }
 
@@ -288,6 +298,7 @@ void draw_flat_obj_LEGACY_GL(std::vector<std::vector<GLfloat>>& indexed_vertices
 	for (int i = 0; i < (int)indexed_vertices.size(); i++) {
 		std::vector<GLfloat> vertex_vec = indexed_vertices[i];
 		GLfloat* vertex = &vertex_vec[0];
+		glNormal3fv(vertex);
 		glVertex3fv(vertex);
 	}
 	glEnd();
@@ -331,9 +342,9 @@ void drawCheckerBoard_LEGACY_GL(int Cwidth, int Cdepth, GLfloat COLOR1[], GLfloa
 }
 
 // default setting
-void display_scene_obj() {
+void display_scene_obj(std::vector<GLfloat>& init_cam_pos) {
 
-	std::vector<GLfloat> init_cam_pos = { 3.0, 6.0, 7.0 };
+	//std::vector<GLfloat> init_cam_pos = { 3.0, 6.0, 7.0 };
 	std::vector<GLfloat> cam_trans = { 0, 0, -1 };
 	std::vector<GLfloat> cam_rot = { 0, 0, 0 };
 	std::vector<GLfloat> init_light_pos = { 1, 3, 5 };

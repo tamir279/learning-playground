@@ -20,6 +20,7 @@
 
 static GLint fogMode;
 GLenum shade_mode = GL_SMOOTH;
+GLenum type = GL_TRIANGLES;
 
 GLfloat x_translation = 0.0;
 GLfloat y_translation = 0.0;
@@ -45,16 +46,16 @@ renderDataContainer surface;
 void init(void) {
 	generate_icosahedron_rigidBody_array(bodyList);
 	init_scene_params_LEGACY_GL(fogMode, shade_mode);
-	surface = generateNoisySurface(-3.0, -3.0, 3.0, 3.0, 0.0, 3.2);
+	surface = generateNoisySurface(-3.0, -3.0, 3.0, 3.0, 0.0);
 }
 
 void display(void) {
 	std::vector<GLfloat> keyboardMovement = { init_pt[0] + x_translation, init_pt[1] + y_translation, init_pt[2] + z_translation };
 	display_scene_obj(keyboardMovement);
 	glPushMatrix();
-	drawNoisySurface_LEGACY_GL(surface);
+	drawNoisySurface_LEGACY_GL(surface, type);
 	glPopMatrix();
-	draw_multipleFlatRigidBodies_LEGACY_GL(bodyList, GL_TRIANGLES);
+	draw_multipleFlatRigidBodies_LEGACY_GL(bodyList, type);
 	glPopMatrix();
 	glFlush();
 	glutSwapBuffers();
@@ -121,6 +122,13 @@ void keyboard(unsigned char key, int x, int y) {
 	}
 }
 
+void mouse(int button, int event, int x, int y) {
+	if (button == GLUT_LEFT_BUTTON && event == GLUT_DOWN) {
+		if (type == GL_TRIANGLES) { type = GL_LINES; }
+		else { type = GL_TRIANGLES; }
+		glutPostRedisplay();
+	}
+}
 
 int main(int argc, char** argv)
 {
@@ -136,6 +144,7 @@ int main(int argc, char** argv)
 	glutDisplayFunc(display);
 	glutReshapeFunc(sceneReshape);
 	glutKeyboardFunc(keyboard);
+	glutMouseFunc(mouse);
 	systemPhysicsLoop(0);
 	glutMainLoop();
 }

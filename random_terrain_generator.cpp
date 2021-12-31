@@ -16,19 +16,52 @@
 #define DY 0.5F;
 
 // generate noise induced surface from flat surface
+
+
+vector3DContainer getGridIndices(int x_s, int y_s) {
+
+	vector3DContainer polygonIndices;
+	int M_SIZE = x_s * y_s;
+
+	for (int i = 0; i < M_SIZE - y_s; i++) {
+
+		if ((i + 1) % y_s == 0 && i > 0) {
+			continue;
+		}
+		else {
+			// first triange
+			vector3D triangleIndices;
+
+			triangleIndices.x = (GLfloat)i;
+			triangleIndices.y = (GLfloat)i + (GLfloat)y_s;
+			triangleIndices.z = (GLfloat)i + (GLfloat)y_s + 1;
+
+			polygonIndices.grid.push_back(triangleIndices);
+
+			// second triangle
+			triangleIndices.x = (GLfloat)i;
+			triangleIndices.y = (GLfloat)i + 1;
+			triangleIndices.z = (GLfloat)i + (GLfloat)y_s + 1;
+
+			polygonIndices.grid.push_back(triangleIndices);
+		}
+	}
+	return polygonIndices;
+}
+
 renderDataContainer generateFlatSurface(GLfloat min_x, GLfloat min_y, GLfloat max_x, GLfloat max_y, GLfloat z_level) {
-	
+
 	vector3DContainer flatMesh;
 	vector3DContainer normals;
 
-	int i = 0, j = 0;
+	int x_size = 0, y_size = 0;
 	GLfloat x_pt = min_x;
 	GLfloat y_pt = min_y;
 	vector3D point;
 	vector3D normal;
 
 	while (x_pt < max_x) {
-		y_pt = min_y;
+		y_pt = min_y; y_size = 0;
 		while (y_pt < max_y) {
 
 			point.x = x_pt;
@@ -42,41 +75,36 @@ renderDataContainer generateFlatSurface(GLfloat min_x, GLfloat min_y, GLfloat ma
 			flatMesh.grid.push_back(point);
 			normals.grid.push_back(normal);
 
-			y_pt += DY;
+			y_pt += DY; y_size++;
 		}
-		x_pt += DX;
+		x_pt += DX; x_size++;
 	}
-	
+
 	renderDataContainer flatSurface;
 	flatSurface.vertexGrid = flatMesh;
 	flatSurface.normalGrid = normals;
+	flatSurface.GridIndices = getGridIndices(x_size, y_size);
 
 	return flatSurface;
 }
-
-// generate noise vector
-vector3D noise(GLfloat amplitude) {
-
-	double mean = 5.0;
-	double s_d = 2.0;
-
-	std::default_random_engine generator;
-	std::normal_distribution<double> distribution(mean, s_d);
-
-	vector3D noise;
-
-	noise.x = (GLfloat)distribution(generator);
-	noise.y = (GLfloat)distribution(generator);
-	noise.z = (GLfloat)distribution(generator);
-
-	return noise;
-}
-
 
 float euclideanDistance(vector3D pt1, vector3D pt2) {
 
 	float dist_sq = (pt1.x - pt2.x) * (pt1.x - pt2.x) + (pt1.y - pt2.y) * (pt1.y - pt2.y) + (pt1.z - pt2.z) * (pt1.z - pt2.z);
 	return fast_sqrt(dist_sq);
+}
+
+// generate noise vector
+vector3D noise(double mean, double s_d) {
+
+	std::random_device rd;
+	std::default_random_engine generator(rd());
+	std::normal_distribution<double> distribution(mean, s_d);
+
+	vector3D noise;
+	noise.z = (GLfloat)distribution(generator);
+
+	return noise;
 }
 
 vector3D cross_product(vector3D v1, vector3D v2) {
@@ -127,10 +155,9 @@ vector3DContainer getClosestPointInGrid(vector3DContainer vertexGrid, vector3D r
 	vector3DContainer triangle;
 	triangle.grid.push_back(vertexGrid.grid[closestPtIndex]);
 	triangle.grid.push_back(vertexGrid.grid[secondClosestPtIndex]);
-	
+
 	return triangle;
 }
-
 
 vector3D calculateNormal(vector3DContainer vertexGrid, vector3D refPt) {
 	vector3DContainer triangleVertices = getClosestPointInGrid(vertexGrid, refPt);
@@ -150,24 +177,27 @@ vector3D calculateNormal(vector3DContainer vertexGrid, vector3D refPt) {
 }
 
 
-vector3DContainer add_noiseToVertexGrid(renderDataContainer grid, GLfloat amplitude) {
+vector3DContainer add_noiseToVertexGrid(renderDataContainer grid) {
 
 	vector3DContainer flatVertexGrid = grid.vertexGrid;
 
 	vector3DContainer noisyVertexGrid;
 
-	GLfloat alpha1 = 2.4f, alpha2 = 0.8f;
+	GLfloat alpha1 = 2.4f, alpha2 = 0.8f, alpha3 = 1.4f, alpha4 = 0.2f;
 
 	for (auto vector3 = flatVertexGrid.grid.begin(); vector3 != flatVertexGrid.grid.end(); ++vector3) {
 		vector3D v = *vector3;
 		// randomly sample noise vector 
- 		vector3D n = noise(amplitude);
+		vector3D n1 = noise(2.0, 0.5);
+		vector3D n2 = noise(0.6, 0.2);
+		vector3D n3 = noise(5.0, 2.5);
+
 		vector3D linearCombination;
 
 		// it can be better if the combination would be with more axis (y, z)
-		linearCombination.x = alpha1 * n.x + alpha2 * v.x;
-		linearCombination.y = alpha1 * n.y + alpha2 * v.y;
-		linearCombination.z = alpha1 * n.z + alpha2 * v.z;
+		linearCombination.x = v.x;
+		linearCombination.y = v.y;
+		linearCombination.z = alpha1 * n2.z - alpha2 * n1.z + alpha3 * v.z - alpha4 * n3.z;
 
 		noisyVertexGrid.grid.push_back(linearCombination);
 	}
@@ -192,36 +222,51 @@ renderDataContainer generateNoisySurface(GLfloat min_x,
 	GLfloat min_y,
 	GLfloat max_x,
 	GLfloat max_y,
-	GLfloat z_level,
-	GLfloat amplitude) {
+	GLfloat z_level) {
 
 	renderDataContainer flatSurface = generateFlatSurface(min_x, min_y, max_x, max_y, z_level);
-	vector3DContainer NoisyVertexGrid = add_noiseToVertexGrid(flatSurface, amplitude);
+	vector3DContainer NoisyVertexGrid = add_noiseToVertexGrid(flatSurface);
 	vector3DContainer NoisyNormalGrid = calculate_noisyNormals(flatSurface);
 
 	renderDataContainer noisySurface;
 	noisySurface.normalGrid = NoisyNormalGrid;
 	noisySurface.vertexGrid = NoisyVertexGrid;
+	noisySurface.GridIndices = flatSurface.GridIndices;
 
 	return noisySurface;
 }
 
 // draw the surface
 // TODO : create directional rendering
-void drawNoisySurface_LEGACY_GL(renderDataContainer surface) {
+void drawNoisySurface_LEGACY_GL(renderDataContainer surface, GLenum type) {
 
 	vector3DContainer vertexField = surface.vertexGrid;
 	vector3DContainer normalContainer = surface.normalGrid;
+	vector3DContainer indices = surface.GridIndices;
 
-	int v_size = (int)vertexField.grid.size();
-	int n_size = (int)normalContainer.grid.size();
+	int indexArraySize = (int)indices.grid.size();
 
-	glBegin(GL_TRIANGLES);
-	for (int i1 = 0, i2 = 0; (i1 < v_size) && (i2 < n_size); i1++, i2++) {
-		vector3D vertex = vertexField.grid[i1];
-		vector3D normal = normalContainer.grid[i2];
-		glNormal3f(normal.x, normal.y, normal.z);
-		glVertex3f(vertex.x, vertex.y, vertex.z);
+	glBegin(type);
+	for (int i = 0; i < indexArraySize; i++) {
+		vector3D ind = indices.grid[i];
+
+		vector3D normal1 = normalContainer.grid[(int)ind.x];
+		vector3D vertex1 = vertexField.grid[(int)ind.x];
+
+		vector3D normal2 = normalContainer.grid[(int)ind.y];
+		vector3D vertex2 = vertexField.grid[(int)ind.y];
+
+		vector3D normal3 = normalContainer.grid[(int)ind.z];
+		vector3D vertex3 = vertexField.grid[(int)ind.z];
+
+		glNormal3f(normal1.x, normal1.y, normal1.z);
+		glVertex3f(vertex1.x, vertex1.y, vertex1.z);
+
+		glNormal3f(normal2.x, normal2.y, normal2.z);
+		glVertex3f(vertex2.x, vertex2.y, vertex2.z);
+
+		glNormal3f(normal3.x, normal3.y, normal3.z);
+		glVertex3f(vertex3.x, vertex3.y, vertex3.z);
 	}
 	glEnd();
 }

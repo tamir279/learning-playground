@@ -39,21 +39,23 @@ typedef struct cont {
 typedef struct Container {
 	vector3DContainer vertexGrid;
 	vector3DContainer normalGrid;
+	vector3DContainer GridIndices;
 }renderDataContainer;
 
+vector3DContainer getGridIndices(int x_s, int y_s);
 renderDataContainer generateFlatSurface(GLfloat min_x, GLfloat min_y, GLfloat max_x, GLfloat max_y, GLfloat z_level);
-vector3D noise(GLfloat amplitude);
 float euclideanDistance(vector3D pt1, vector3D pt2);
+vector3D noise(double mean, double s_d);
 vector3D cross_product(vector3D v1, vector3D v2);
 vector3D normalize(vector3D v);
 vector3DContainer getClosestPointInGrid(vector3DContainer vertexGrid, vector3D refPt);
 vector3D calculateNormal(vector3DContainer vertexGrid, vector3D refPt);
-vector3DContainer add_noiseToVertexGrid(renderDataContainer grid, GLfloat amplitude);
+vector3DContainer add_noiseToVertexGrid(renderDataContainer grid);
 vector3DContainer calculate_noisyNormals(renderDataContainer grid);
-renderDataContainer generateNoisySurface(GLfloat min_x, GLfloat min_y, GLfloat max_x, GLfloat max_y, GLfloat z_level, GLfloat amplitude);
+renderDataContainer generateNoisySurface(GLfloat min_x, GLfloat min_y, GLfloat max_x, GLfloat max_y, GLfloat z_level);
 
 // draw
 
-void drawNoisySurface_LEGACY_GL(renderDataContainer surface);
+void drawNoisySurface_LEGACY_GL(renderDataContainer surface, GLenum type);
 
 #endif
