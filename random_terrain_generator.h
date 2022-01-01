@@ -28,6 +28,11 @@ typedef struct vertex {
 	GLfloat z = 0;
 }vector3D;
 
+typedef struct coeffVec {
+	int n = 4;
+	std::vector<GLfloat> coeffs = std::vector<GLfloat>(n);
+}coeffVectorND;
+
 typedef struct cont2D {
 	std::vector<vector2D> grid;
 }vector2DContainer;
@@ -42,6 +47,10 @@ typedef struct Container {
 	vector3DContainer GridIndices;
 }renderDataContainer;
 
+typedef struct surfaceTile {
+	std::vector<renderDataContainer> tileContainer;
+}surfaceTileContainer;
+
 vector3DContainer getGridIndices(int x_s, int y_s);
 renderDataContainer generateFlatSurface(GLfloat min_x, GLfloat min_y, GLfloat max_x, GLfloat max_y, GLfloat z_level);
 float euclideanDistance(vector3D pt1, vector3D pt2);
@@ -53,9 +62,10 @@ vector3D calculateNormal(vector3DContainer vertexGrid, vector3D refPt);
 vector3DContainer add_noiseToVertexGrid(renderDataContainer grid);
 vector3DContainer calculate_noisyNormals(renderDataContainer grid);
 renderDataContainer generateNoisySurface(GLfloat min_x, GLfloat min_y, GLfloat max_x, GLfloat max_y, GLfloat z_level);
+surfaceTileContainer generateSurfaceTiles(int n, GLfloat z, bool surfaceType);
 
 // draw
-
 void drawNoisySurface_LEGACY_GL(renderDataContainer surface, GLenum type);
+void draw_surfaceTiles(surfaceTileContainer surface_tiles, GLenum type);
 
 #endif

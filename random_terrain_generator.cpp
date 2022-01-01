@@ -236,6 +236,27 @@ renderDataContainer generateNoisySurface(GLfloat min_x,
 	return noisySurface;
 }
 
+// n is the number of tiles on each axis (odd), the function creates a squared tiling
+surfaceTileContainer generateSurfaceTiles(int n, GLfloat z, bool surfaceType) {
+	surfaceTileContainer tiles;
+	// run on x axis
+	for (int i = 0; i < n; i++) {
+		// run on y axis
+		for (int j = 0; j < n; j++) {
+			int min_x = -n + 2 * i, min_y = -n + 2 * j;
+			int max_x = -n + 2 * (i + 1), max_y = -n + 2 * (j + 1);
+
+			GLfloat mx = (GLfloat)min_x - (GLfloat)0.25, my = (GLfloat)min_y - (GLfloat)0.25;
+			GLfloat mxx = (GLfloat)max_x + (GLfloat)0.25, mxy = (GLfloat)max_y + (GLfloat)0.25;
+			renderDataContainer surface;
+			if(surfaceType){ surface = generateNoisySurface(mx, my, mxx, mxy, z); }
+			else{ surface = generateFlatSurface(mx, my, mxx, mxy, z); }
+			tiles.tileContainer.push_back(surface);
+		}
+	}
+	return tiles;
+}
+
 // draw the surface
 // TODO : create directional rendering
 void drawNoisySurface_LEGACY_GL(renderDataContainer surface, GLenum type) {
@@ -269,4 +290,12 @@ void drawNoisySurface_LEGACY_GL(renderDataContainer surface, GLenum type) {
 		glVertex3f(vertex3.x, vertex3.y, vertex3.z);
 	}
 	glEnd();
+}
+
+void draw_surfaceTiles(surfaceTileContainer surface_tiles, GLenum type) {
+	surfaceTileContainer tmp = surface_tiles;
+	for (auto tile = tmp.tileContainer.begin(); tile != tmp.tileContainer.end(); ++tile) {
+		renderDataContainer surface_tile = *tile;
+		drawNoisySurface_LEGACY_GL(surface_tile, type);
+	}
 }
