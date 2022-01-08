@@ -8,6 +8,7 @@
 
 #include "vulkanMainPipeLine.h"
 #include "validationLayersDebug.h"
+#include "dataLoadingAndGraphics.h"
 
 int main() {
 
