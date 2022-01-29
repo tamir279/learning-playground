@@ -15,8 +15,14 @@
 #include <stb_image.h>
 #pragma warning( pop )
 
+#pragma warning( push )
+#pragma warning( disable : 26495 )
+#pragma warning( disable : 26451 )
+#pragma warning( disable : 26812 )
+#pragma warning( disable : 26498 )
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
+#pragma( pop )
 
 #include <string>
 #include <cstring>
@@ -41,6 +47,10 @@
 #include "validationLayersDebug.h"
 #include "dataLoadingAndGraphics.h"
 
+#define ROTATION_DELTA_AROUND_X_AXIS 1.5E-02f
+#define ROTATION_DELTA_AROUND_Y_AXIS 1.5E-02f
+#define ROTATION_DELTA_AROUND_Z_AXIS 1.5E-02f
+
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
 
@@ -52,10 +62,18 @@ const std::vector<const char*> deviceExtensions = {
 	VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
 
+glm::vec3 lightPosition = glm::vec3(0.0f, 0.0f, 10.0f);
+glm::vec3 lightColor = glm::vec3(150.0f, 150.0f, 150.0f);
 
-const std::string MODEL_PATH = "models/viking_room.obj";
-const std::string TEXTURE_PATH = "textures/viking_room.png";
+const std::string MODEL_PATH = "models/Alien Animal.obj";
+const std::string ALBEDO_MAP_PATH = "textures/alien-animal/Alien-Animal-Base-Color.jpg";
+const std::string NORMAL_MAP_PATH = "textures/alien-animal/Alien-Animal-Base-Nor.jpg";
+const std::string METALLIC_MAP_PATH = "textures/alien-animal/Alien-Animal-Base-Metallic.jpg";
+const std::string ROUGHNESS_MAP_PATH = "textures/alien-animal/Alien-Animal-Base-Gloss.jpg";
+const std::string AO_MAP_PATH = "textures/alien-animal/Alien-Animal-Base-Diffuse.jpg";
 
+DynamicTransform Transforms{};
+TextureAssets textures{};
 
 #ifdef NDEBUG
 const bool enableValidationLayers = false;
@@ -91,8 +109,32 @@ void app::mainLoop() {
 			swapChainFramebuffers, commandPool, graphicsPipeline, pipelineLayout, vertexBuffer, indexBuffer, framebufferResized, descriptorSetLayout,
 			uniformBuffers, uniformBuffersMemory, descriptorPool, descriptorSets, textureImageView, textureSampler, depthImageView, depthImage,
 			depthImageMemory, indexArr);
+
+		glfwSetKeyCallback(window, keyCallback);
 	}
 	vkDeviceWaitIdle(device);
+}
+
+void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+
+	if (key == GLFW_KEY_E && action != GLFW_PRESS) {
+		Transforms.Rotation.z += ROTATION_DELTA_AROUND_Z_AXIS;
+	}
+	else if (key == GLFW_KEY_Q && action != GLFW_PRESS) {
+		Transforms.Rotation.z -= ROTATION_DELTA_AROUND_Z_AXIS;
+	}
+	else if (key == GLFW_KEY_W && action != GLFW_PRESS) {
+		Transforms.Translation.y += ROTATION_DELTA_AROUND_Z_AXIS;
+	}
+	else if (key == GLFW_KEY_S && action != GLFW_PRESS) {
+		Transforms.Translation.y -= ROTATION_DELTA_AROUND_Z_AXIS;
+	}
+	else if (key == GLFW_KEY_A && action != GLFW_PRESS) {
+		Transforms.Translation.x -= ROTATION_DELTA_AROUND_Z_AXIS;
+	}
+	else if (key == GLFW_KEY_D && action != GLFW_PRESS) {
+		Transforms.Translation.x += ROTATION_DELTA_AROUND_Z_AXIS;
+	}
 }
 
 void app::cleanUp() {
@@ -592,7 +634,7 @@ void recreateSwapChain(GLFWwindow*& window, VkDevice device, std::vector<VkFence
 	std::vector<VkDescriptorSet>& descriptorSets, VkImageView textureImageView, VkSampler textureSampler, VkImageView& depthImageView, VkImage& depthImage, VkDeviceMemory& depthImageMemory,
 	VkQueue graphicsQueue, std::vector<uint32_t> indexArr) {
 	
-	int width = 0, height = 0;
+	int width, height;
 	glfwGetFramebufferSize(window, &width, &height);
 	while (width == 0 || height == 0) {
 		glfwGetFramebufferSize(window, &width, &height);
@@ -1196,6 +1238,16 @@ void createIndexBuffer(VkDevice device, VkPhysicalDevice physicalDevice, VkBuffe
 }
 
 /* descriptor layout and buffer */
+// create shader bindings - for both the vertex nd fragment shaders - by binding indices
+// for PBR model lighting - there are 6 bindings :
+/*
+the UBO - vertex shader
+albedo map - fragment shader
+normal map - fragmet shader
+metalic map - fragmet shader
+roughness map - fragment shader
+ambient occlusion map - fragment shader
+*/
 
 void createDescriptorSetLayout(VkDevice device, VkDescriptorSetLayout& descriptorSetLayout) {
 
@@ -1206,14 +1258,47 @@ void createDescriptorSetLayout(VkDevice device, VkDescriptorSetLayout& descripto
 	uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 	uboLayoutBinding.pImmutableSamplers = nullptr;
 
-	VkDescriptorSetLayoutBinding samplerLayoutBinding{};
-	samplerLayoutBinding.binding = 1;
-	samplerLayoutBinding.descriptorCount = 1;
-	samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	samplerLayoutBinding.pImmutableSamplers = nullptr;
-	samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	VkDescriptorSetLayoutBinding albedoMapSamplerLayoutBinding{};
+	albedoMapSamplerLayoutBinding.binding = 1;
+	albedoMapSamplerLayoutBinding.descriptorCount = 1;
+	albedoMapSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	albedoMapSamplerLayoutBinding.pImmutableSamplers = nullptr;
+	albedoMapSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-	std::array<VkDescriptorSetLayoutBinding, 2> bindings = { uboLayoutBinding, samplerLayoutBinding };
+	VkDescriptorSetLayoutBinding normalMapSamplerLayoutBinding{};
+	normalMapSamplerLayoutBinding.binding = 2;
+	normalMapSamplerLayoutBinding.descriptorCount = 1;
+	normalMapSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	normalMapSamplerLayoutBinding.pImmutableSamplers = nullptr;
+	normalMapSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+	VkDescriptorSetLayoutBinding metalicMapSamplerLayoutBinding{};
+	metalicMapSamplerLayoutBinding.binding = 3;
+	metalicMapSamplerLayoutBinding.descriptorCount = 1;
+	metalicMapSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	metalicMapSamplerLayoutBinding.pImmutableSamplers = nullptr;
+	metalicMapSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+	VkDescriptorSetLayoutBinding roughnessMapSamplerLayoutBinding{};
+	roughnessMapSamplerLayoutBinding.binding = 4;
+	roughnessMapSamplerLayoutBinding.descriptorCount = 1;
+	roughnessMapSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	roughnessMapSamplerLayoutBinding.pImmutableSamplers = nullptr;
+	roughnessMapSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+	VkDescriptorSetLayoutBinding aoMapSamplerLayoutBinding{};
+	aoMapSamplerLayoutBinding.binding = 5;
+	aoMapSamplerLayoutBinding.descriptorCount = 1;
+	aoMapSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	aoMapSamplerLayoutBinding.pImmutableSamplers = nullptr;
+	aoMapSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+	std::array<VkDescriptorSetLayoutBinding, 6> bindings = { uboLayoutBinding,
+															 albedoMapSamplerLayoutBinding,
+															 normalMapSamplerLayoutBinding,
+															 metalicMapSamplerLayoutBinding,
+															 roughnessMapSamplerLayoutBinding,
+															 aoMapSamplerLayoutBinding };
 	VkDescriptorSetLayoutCreateInfo layoutInfo{};
 	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 	layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
@@ -1240,16 +1325,17 @@ void createUniformBuffers(VkDevice device, VkPhysicalDevice physicalDevice, std:
 // specific sample for spinninig around
 
 void updateUniformBuffer(VkDevice device, std::vector<VkDeviceMemory> uniformBuffersMemory, VkExtent2D swapChainExtent, uint32_t currentImage) {
-	static auto startTime = std::chrono::high_resolution_clock::now();
 
-	auto currentTime = std::chrono::high_resolution_clock::now();
-	float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+	glm::vec3 eye = glm::vec3(2.0f + Transforms.Translation.x, 2.0f + Transforms.Translation.y, 2.0f + Transforms.Translation.z);
+	glm::vec3 center = glm::vec3(0.0f, 0.0f, 0.0f);
+	glm::vec3 up = glm::vec3(0.0f, 0.0f, 1.0f);
 
 	UniformBufferObject ubo{};
-	ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-	ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+	ubo.model = transformationMatrix(Transforms);
+	ubo.view = glm::lookAt(eye, center, up);
 	ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
 	ubo.proj[1][1] *= -1;
+	ubo.eye = glm::vec4(eye, 1.0f);
 
 	void* data;
 	vkMapMemory(device, uniformBuffersMemory[currentImage], 0, sizeof(ubo), 0, &data);
@@ -1260,11 +1346,28 @@ void updateUniformBuffer(VkDevice device, std::vector<VkDeviceMemory> uniformBuf
 /* descriptor pools and sets definitons */
 
 void createDescriptorPool(VkDevice device, std::vector<VkImage> swapChainImages, VkDescriptorPool& descriptorPool) {
-	std::array<VkDescriptorPoolSize, 2> poolSizes{};
+	std::array<VkDescriptorPoolSize, 6> poolSizes{};
+	// each frame has one UBO - hence the number of descriptors needed in one frame buffer is
+	// the number of images stored in the buffer.
 	poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	poolSizes[0].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+
+	// the same principle holds here as well, each sampler needs a descriptor set for each frame
+	// albedo map
 	poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	poolSizes[1].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+	// normal map
+	poolSizes[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	poolSizes[2].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+	// metalic map
+	poolSizes[3].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	poolSizes[3].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+	// roughness map
+	poolSizes[4].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	poolSizes[4].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+	// ambient 
+	poolSizes[5].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	poolSizes[5].descriptorCount = static_cast<uint32_t>(swapChainImages.size());
 
 	VkDescriptorPoolCreateInfo poolInfo{};
 	poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1279,7 +1382,7 @@ void createDescriptorPool(VkDevice device, std::vector<VkImage> swapChainImages,
 
 void createDescriptorSets(VkDevice device, std::vector<VkImage> swapChainImages, VkDescriptorPool& descriptorPool, 
 	VkDescriptorSetLayout descriptorSetLayout, std::vector<VkDescriptorSet>& descriptorSets,std::vector<VkBuffer> uniformBuffers, VkImageView textureImageView,
-	VkSampler textureSampler) {
+	VkSampler textureSampler, TextureAssets textureAssetArray) {
 	std::vector<VkDescriptorSetLayout> layouts(swapChainImages.size(), descriptorSetLayout);
 	VkDescriptorSetAllocateInfo allocInfo{};
 	allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -1293,17 +1396,26 @@ void createDescriptorSets(VkDevice device, std::vector<VkImage> swapChainImages,
 	}
 
 	for (size_t i = 0; i < swapChainImages.size(); i++) {
+
+		// for the UBO
 		VkDescriptorBufferInfo bufferInfo{};
 		bufferInfo.buffer = uniformBuffers[i];
 		bufferInfo.offset = 0;
 		bufferInfo.range = sizeof(UniformBufferObject);
 
-		VkDescriptorImageInfo imageInfo{};
-		imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		imageInfo.imageView = textureImageView;
-		imageInfo.sampler = textureSampler;
+		// for the images
+		std::vector<VkDescriptorImageInfo> imagesInfo{};
 
-		std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
+		for (uint32_t j = 0; j < textureAssetArray.textureLayers; j++) {
+			VkDescriptorImageInfo imageInfo{};
+			imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			imageInfo.imageView = textureAssetArray.textureImagesView[j];
+			imageInfo.sampler = textureAssetArray.textureSamplers[j];
+			imagesInfo.push_back(imageInfo);
+		}
+
+		// there are 5 texture layers for a PBR texture set.
+		std::array<VkWriteDescriptorSet, 6> descriptorWrites{};
 
 		descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		descriptorWrites[0].dstSet = descriptorSets[i];
@@ -1313,13 +1425,15 @@ void createDescriptorSets(VkDevice device, std::vector<VkImage> swapChainImages,
 		descriptorWrites[0].descriptorCount = 1;
 		descriptorWrites[0].pBufferInfo = &bufferInfo;
 
-		descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		descriptorWrites[1].dstSet = descriptorSets[i];
-		descriptorWrites[1].dstBinding = 1;
-		descriptorWrites[1].dstArrayElement = 0;
-		descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		descriptorWrites[1].descriptorCount = 1;
-		descriptorWrites[1].pImageInfo = &imageInfo;
+		for (int k = 0; k < textureAssetArray.textureLayers; k++) {
+			descriptorWrites[k + 1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			descriptorWrites[k + 1].dstSet = descriptorSets[i];
+			descriptorWrites[k + 1].dstBinding = 1;
+			descriptorWrites[k + 1].dstArrayElement = 0;
+			descriptorWrites[k + 1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+			descriptorWrites[k + 1].descriptorCount = 1;
+			descriptorWrites[k + 1].pImageInfo = &imagesInfo[k];
+		}
 
 		vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
 	}
@@ -1327,7 +1441,7 @@ void createDescriptorSets(VkDevice device, std::vector<VkImage> swapChainImages,
 
 /* create texture images */
 
-
+// for a specific image
 void createImage(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling,
 	VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
 	VkImageCreateInfo imageInfo{};
@@ -1364,9 +1478,10 @@ void createImage(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t widt
 	vkBindImageMemory(device, image, imageMemory, 0);
 }
 
-void createTextureImage(VkDevice device, VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue graphicsQueue, VkImage& textureImage, VkDeviceMemory& textureImageMemory) {
+// for a specific texture image
+void createTextureImage(VkDevice device, VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue graphicsQueue, VkImage& textureImage, VkDeviceMemory& textureImageMemory, std::string texturePath) {
 	int texWidth, texHeight, texChannels;
-	stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+	stbi_uc* pixels = stbi_load(texturePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
 	int size = texWidth * texHeight * 4;
 	VkDeviceSize imageSize = size;
 
@@ -1428,6 +1543,7 @@ void endSingleTimeCommands(VkDevice device, VkCommandPool commandPool, VkQueue g
 	vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
 }
 
+// for creating image
 void transitionImageLayout(VkDevice device, VkCommandPool commandPool, VkQueue graphicsQueue, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
 	VkCommandBuffer commandBuffer = beginSingleTimeCommands(device, commandPool);
 
@@ -1477,6 +1593,7 @@ void transitionImageLayout(VkDevice device, VkCommandPool commandPool, VkQueue g
 	endSingleTimeCommands(device, commandPool, graphicsQueue ,commandBuffer);
 }
 
+// for creating an image
 void copyBufferToImage(VkDevice device, VkCommandPool commandPool, VkQueue graphicsQueue, VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) {
 	VkCommandBuffer commandBuffer = beginSingleTimeCommands(device, commandPool);
 
@@ -1500,7 +1617,7 @@ void copyBufferToImage(VkDevice device, VkCommandPool commandPool, VkQueue graph
 	endSingleTimeCommands(device, commandPool, graphicsQueue, commandBuffer);
 }
 
-
+// for an image
 VkImageView createImageView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) {
 	VkImageViewCreateInfo viewInfo{};
 	viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -1521,11 +1638,13 @@ VkImageView createImageView(VkDevice device, VkImage image, VkFormat format, VkI
 	return imageView;
 }
 
+// for the texture images
 void createTextureImageView(VkDevice device, VkImage textureImage, VkImageView& textureImageView) {
 
 	textureImageView = createImageView(device, textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
 }
 
+// create a sampler for a specific texture image
 void createTextureSampler(VkDevice device, VkPhysicalDevice physicalDevice, VkSampler& textureSampler) {
 	VkPhysicalDeviceProperties properties{};
 	vkGetPhysicalDeviceProperties(physicalDevice, &properties);
@@ -1550,6 +1669,26 @@ void createTextureSampler(VkDevice device, VkPhysicalDevice physicalDevice, VkSa
 
 	if (vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS) {
 		throw std::runtime_error("failed to create texture sampler!");
+	}
+}
+
+// create and sample multiple texture layers - for PBR 
+void createTextureImageLayers(VkDevice device, VkPhysicalDevice physicalDevice, VkCommandPool commandPool, VkQueue graphicsQueue, TextureAssets texAssets, std::array<std::string, 5> texturePaths) {
+
+	for (int i = 0; i < texturePaths.size(); i++) {
+		VkImage image;
+		VkDeviceMemory imageMemory;
+		VkImageView textureImageView;
+		VkSampler textureSampler;
+
+		createTextureImage(device, physicalDevice, commandPool, graphicsQueue, image, imageMemory, texturePaths[i]);
+		createTextureImageView(device, image, textureImageView);
+		createTextureSampler(device, physicalDevice, textureSampler);
+
+		texAssets.textureImages.push_back(image);
+		texAssets.textureImagesMemory.push_back(imageMemory);
+		texAssets.textureImagesView.push_back(textureImageView);
+		texAssets.textureSamplers.push_back(textureSampler);
 	}
 }
 
@@ -1593,6 +1732,7 @@ void createDepthResources(VkDevice device, VkPhysicalDevice physicalDevice, VkCo
 
 /* loading model */
 
+// TODO : needed to be adjusted for multiple texture maps per obj. file
 void loadModel(std::vector<Vertex>& vertices, std::vector<uint32_t>& indexArr) {
 	tinyobj::attrib_t attrib;
 	std::vector<tinyobj::shape_t> shapes;
@@ -1610,17 +1750,23 @@ void loadModel(std::vector<Vertex>& vertices, std::vector<uint32_t>& indexArr) {
 			Vertex vertex{};
 
 			vertex.pos = {
-				attrib.vertices[3 * index.vertex_index + 0],
-				attrib.vertices[3 * index.vertex_index + 1],
-				attrib.vertices[3 * index.vertex_index + 2]
+				attrib.vertices[3 * (int)index.vertex_index + 0],
+				attrib.vertices[3 * (int)index.vertex_index + 1],
+				attrib.vertices[3 * (int)index.vertex_index + 2]
+			};
+
+			vertex.normal = {
+				attrib.normals[3 * (int)index.normal_index + 0],
+				attrib.normals[3 * (int)index.normal_index + 1],
+				attrib.normals[3 * (int)index.normal_index + 2]
 			};
 
 			vertex.texCoord = {
-				attrib.texcoords[2 * index.texcoord_index + 0],
-				1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+				attrib.texcoords[2 * (int)index.texcoord_index + 0],
+				1.0f - attrib.texcoords[2 * (int)index.texcoord_index + 1]
 			};
 
-			vertex.color = { 1.0f, 1.0f, 1.0f };
+			//vertex.color = { 1.0f, 1.0f, 1.0f };
 
 			if (uniqueVertices.count(vertex) == 0) {
 				uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
