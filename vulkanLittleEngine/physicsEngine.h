@@ -3,6 +3,7 @@
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/norm.hpp>
 #include <vector>
 #include <array>
 
@@ -14,7 +15,31 @@
 #include <thrust/pair.h>
 #include <algorithm>
 
+#define PARTICE_RADIUS 0.1
+
 namespace MLPE {
+
+	namespace GeneralUsage {
+
+		// general use - transform from vector to thrust::device_vector
+		template<typename T>
+		thrust::device_vector<T> mlpe_gu_copyVector(std::vector<T> vec) {
+			thrust::host_vector<T> th_vec;
+			thrust::copy(vec.begin(), vec.end(), th_vec.begin());
+			thrust::device_vector<T> res = th_vec;
+
+			return res;
+		}
+
+		// general use - 3D determinant - for floats/integers only
+		float mlpe_gu_3Ddeterminant(glm::vec3 a, glm::vec3 b, glm::vec3 c) {
+			glm::mat3 colMat = glm::mat3(a, b, c);
+			return glm::determinant(colMat);
+		}
+
+
+	}
+
 
 	// rigid body physics
 	namespace rbp {
@@ -148,6 +173,11 @@ namespace MLPE {
 		geometry info containes the geometry of a given object - position in space
 		*/
 
+		// support is limited to triangle polygons
+		struct polygon {
+			thrust::tuple<glm::vec3, glm::vec3, glm::vec3> polygon;
+		};
+
 		struct particle {
 			float radius;
 			glm::vec3 center;
@@ -158,6 +188,15 @@ namespace MLPE {
 			particle particle;
 		};
 
+		// for grid creation with thrust::tabulate;
+
+		// 3D grid 
+		struct Object3DCubeGrid {
+			//             x dir      y dir     z dir
+			thrust::tuple<uint32_t, uint32_t, uint32_t> gridAxisSize;
+			uint32_t gridSize;
+			thrust::device_vector<glm::vec3> grid;
+		};
 
 		struct mlpe_rbp_RigidBodyParticleDecomposition {
 			std::vector<particle> particleDecomposition;
@@ -259,6 +298,47 @@ namespace MLPE {
 			}
 		};
 
+		// operator for massDistribution combination of data
+		struct mElementComb {
+			__host__ __device__ massElement operator()(float d, particle p) {
+				massElement mE;
+				mE.m = d; mE.particle = p;
+				return mE;
+			}
+		};
+
+		// operator struct for calculating signed solid angle of a polygon compared to specific point
+		struct solidAngle {
+			// the reference point
+			const glm::vec3 p;
+			// p is an input
+			solidAngle(glm::vec3 _p) : p{ _p } {}
+
+			__host__ __device__ float operator()(polygon P) {
+				/*
+				tan(solidAngle/2) = det(a b c)/(|a||b||c| + (a*b)|c| + (b*c)|a| + (c*a)|b|)
+				=> solidAngle = 2arctan(det(a b c)/(|a||b||c| + (a*b)|c| + (b*c)|a| + (c*a)|b|))
+				=> factoredSolidAngle = (1/2PI)*arctan(det(a b c)/(|a||b||c| + (a*b)|c| + (b*c)|a| + (c*a)|b|))
+				*/
+	
+				// definitions of a, b, c
+				glm::vec3 a = thrust::get<0>(P.polygon) - p;
+				glm::vec3 b = thrust::get<1>(P.polygon) - p;
+				glm::vec3 c = thrust::get<2>(P.polygon) - p;
+
+				// calculating norms
+				float n_a = glm::l2Norm(a);
+				float n_b = glm::l2Norm(b);
+				float n_c = glm::l2Norm(c);
+
+				// calculating determinant
+				float det_abc = GeneralUsage::mlpe_gu_3Ddeterminant(a, b, c);
+				float monster = n_a * n_b * n_c + n_c * glm::dot(a, b) + n_a * glm::dot(b, c) + n_b * glm::dot(a, c);
+
+				return glm::atan(det_abc, monster);
+			}
+		};
+
 		/*	
 		-------------------- physics classes --------------------
 		*/
@@ -270,6 +350,12 @@ namespace MLPE {
 		public:
 			std::vector<glm::vec3> vertices;
 			std::vector<uint32_t> indices;
+
+			// polygon structure from file
+			std::vector<polygon> objPolygons;
+
+			// define the particle size (radius)
+			float r = PARTICE_RADIUS;
 
 			// get all extrema points from all axis - minX, maxX, minY, maxY, minZ, maxZ
 			std::array<thrust::pair<glm::vec3, uint32_t>, 6> getExtremumPoints();
@@ -286,6 +372,9 @@ namespace MLPE {
 			// find extremum along specific axis
 			template<typename T1, typename T2>
 			thrust::pair<glm::vec3, uint32_t> extremumAlongAxis(T1 typeOfExtremum, T2 axis);
+
+			// used to copy vertices into - VDV : Vertex Device Vector
+			thrust::device_vector<glm::vec3> VDV;
 		};
 
 		class MLPE_RBP_RIGIDBODY_GEOMETRY {
@@ -319,6 +408,18 @@ namespace MLPE {
 			*/
 			void get3Dgrid(MLPE_RBP_RigidBodyGeometryInfo GeometricInfo);
 
+			// get grid size
+			void get3DgridSize(thrust::tuple<uint32_t, uint32_t, uint32_t> gridSizes);
+
+			/*
+			in order ot decompose geometry we need to decide which particles are inside of the object
+			*/
+			bool calcSignedngleForSpecificPoint(glm::vec3 p, std::vector<polygon> polygons);
+
+			void isParticleInsideObject(MLPE_RBP_RigidBodyGeometryInfo GeometricInfo, std::vector<particle>& DC);
+
+			// define 3d grid and particle vector for the object
+			Object3DCubeGrid grid;
 			mlpe_rbp_RigidBodyParticleDecomposition particleDecomposition;
 		};
 
@@ -366,7 +467,9 @@ namespace MLPE {
 			mlpe_rbp_RigidBodyMassDistribution massDistribution;
 		};
 
+		class MLPE_RBP_forceDistribution {
 
+		};
 		/*
 		.
 		.

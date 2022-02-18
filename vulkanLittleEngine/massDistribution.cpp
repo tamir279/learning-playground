@@ -10,6 +10,7 @@
 #include <thrust/generate.h>
 #include <thrust/reduce.h>
 #include <thrust/functional.h>
+#include <thrust/execution_policy.h>
 #include <algorithm>
 #include <stdexcept>
 #include "physicsEngine.h"
@@ -35,30 +36,36 @@ namespace MLPE {
 		void MLPE_RBP_massDistribution::checkVector(std::vector<T> p) {
 			thrust::device_vector<T> device_vec = copy_vec(p);
 			thrust::device_vector<T>::iterator it;
-			it = thrust::find_if(device_vec.begin(), device_vec.end(), greater_than_one());
+			it = thrust::find_if(thrust::device, device_vec.begin(), device_vec.end(), greater_than_one());
 
 			if (it != device_vec.end()) {
-				throw::std::runtime_error("probability grater than 1");
+				throw::std::runtime_error("probability greater than 1");
 			}
 		}
 
 		// needed to build a mass element - mass per particle + particle - from RigidBodyInfo
 		void MLPE_RBP_massDistribution::distributeMassElements(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo) {
 			checkVector(massDistrib.prob);
-			thrust::device_vector<massElement> device_vec;
-			thrust::transform(massDistrib.prob.begin(), massDistrib.prob.end(), device_vec.begin(), multiplyByConstant<float>(RigidBodyInfo.mass));
+			// define transformed vectors
+			std::vector<float> prob;
+			std::vector<massElement> distribVec;
+			// needed to transform massDistrib<float> to massDistrib2<massElement>
+			thrust::transform(thrust::device, massDistrib.prob.begin(), massDistrib.prob.end(), prob.begin(), multiplyByConstant<float>(RigidBodyInfo.mass));
+			//                                massDistrib prob vector (mass of a particle)             particle info
+			thrust::transform(thrust::device, prob.begin(), prob.end(), RigidBodyInfo.particleDecomposition.particleDecomposition.begin(), distribVec.begin(), mElementComb());
+			massDistribution.massElements = distribVec;
 		}
 
 		void MLPE_RBP_massDistribution::mass(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
 			thrust::device_vector<massElement> massElems_d = copy_vec(massDistribution.massElements);
-			float mass = thrust::reduce(massElems_d.begin(), massElems_d.end(), thrust_add_massElements<massElement>());
+			float mass = thrust::reduce(massElems_d.begin(), massElems_d.end(), 0, thrust_add_massElements<massElement>());
 			RigidBodyInfo.mass = mass;
 		}
 
 
 		glm::vec3 MLPE_RBP_massDistribution::getCenterMass(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
 			thrust::device_vector<massElement> massElems_d = copy_vec(massDistribution.massElements);
-			glm::vec3 sum_vec = thrust::reduce(massElems_d.begin(), massElems_d.end(), thrust_add_Positions<massElement>());
+			glm::vec3 sum_vec = thrust::reduce(massElems_d.begin(), massElems_d.end(), glm::vec3(0), thrust_add_Positions<massElement>());
 			sum_vec *= 1 / RigidBodyInfo.mass;
 
 			return sum_vec;

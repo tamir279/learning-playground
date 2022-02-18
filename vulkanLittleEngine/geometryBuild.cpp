@@ -6,9 +6,18 @@
 #include <array>
 
 #include <thrust/extrema.h>
+#include <thrust/execution_policy.h>
+#include <thrust/fill.h>
+#include<thrust/transform_scan.h>
+#include <thrust/sequence.h>
 #include <algorithm>
 #include <stdexcept>
 #include "physicsEngine.h"
+
+/*
+------------------- RIGID BODY PHYSICS -------------------
+	 GEOMETRY AND PARTICLE DECOMPOSITION OF AN OBJECT
+*/
 
 namespace MLPE {
 	namespace rbp {
@@ -31,15 +40,15 @@ namespace MLPE {
 		// class geometric info - find general extremum
 		template<typename T1, typename T2>
 		thrust::pair<glm::vec3, uint32_t> MLPE_RBP_RigidBodyGeometryInfo::extremumAlongAxis(T1 typeOfExtremum, T2 axis) {
-			thrust::device_vector<glm::vec3> d_vec = copy_vec(vertices);
 			thrust::device_vector<glm::vec3>::iterator it;
 			// for all types of extremum
 			if (extremumType(typeOfExtremum)) {
 				// find maximum
-				it = thrust::max_element(d_vec.begin(), d_vec.end(), extremumOp<glm::vec3, std::string>(axis));
+				it = thrust::max_element(thrust::device, VDV.begin(), VDV.end(), extremumOp<glm::vec3, std::string>(axis));
 			}
 			else {
-				it = thrust::min_element(d_vec.begin(), d_vec.end(), extremumOp<glm::vec3, std::string>(axis));
+				// find minimum
+				it = thrust::min_element(thrust::device, VDV.begin(), VDV.end(), extremumOp<glm::vec3, std::string>(axis));
 			}
 
 			// find index and value
@@ -53,6 +62,7 @@ namespace MLPE {
 		// find all extrema points in vertex grid
 		std::array<thrust::pair<glm::vec3, uint32_t>, 6> MLPE_RBP_RigidBodyGeometryInfo::getExtremumPoints() {
 			std::array<thrust::pair<glm::vec3, uint32_t>, 6> points;
+			VDV = copy_vec(vertices);
 			points[0] = extremumAlongAxis("min", "x");
 			points[1] = extremumAlongAxis("max", "x");	
 			points[2] = extremumAlongAxis("min", "y");
@@ -63,9 +73,116 @@ namespace MLPE {
 			return points;
 		}
 
-		// loads only model geometry - without textures, the model is loaded in the graphics("front end")
-		void MLPE_RBP_RIGIDBODY_GEOMETRY::get3Dgrid(MLPE_RBP_RigidBodyGeometryInfo GeometricInfo) {
+		// get number of points at each axis - grid.
+		template<typename T1, typename T2>
+		thrust::tuple<T1, T1, T1> getGridSize(std::array<thrust::pair<T2, T1>, 6> extremumPts, float Dv) {
+			T1 X_Buffer = static_cast<T1>(std::floor((thrust::get<0>(extremumPts[1]).x - thrust::get<0>(extremumPts[0]).x) / Dv));
+			T1 Y_Buffer = static_cast<T1>(std::floor((thrust::get<0>(extremumPts[3]).y - thrust::get<0>(extremumPts[2]).y) / Dv));
+			T1 Z_Buffer = static_cast<T1>(std::floor((thrust::get<0>(extremumPts[5]).z - thrust::get<0>(extremumPts[4]).z) / Dv));
 
+			return thrust::make_tuple<T1, T1, T1>(X_Buffer, Y_Buffer, Z_Buffer);
+		}
+
+		// transfer grid size data to grid struct
+		void MLPE_RBP_RIGIDBODY_GEOMETRY::get3DgridSize(thrust::tuple<uint32_t, uint32_t, uint32_t> gridSizes) {
+			// get grid sizes
+			grid.gridAxisSize = gridSizes;
+			grid.gridSize = thrust::get<0>(gridSizes) * 
+						    thrust::get<1>(gridSizes) *
+				            thrust::get<2>(gridSizes);
+		}
+
+		/*
+		size of each array element is floor(max.x-min.x/2r) which is the size of array of cubes (or centroid points)
+		in the x direction at specific y, z coordinates. therefore, there are N = L*floor(max.z-min.z/2r) elements,
+		while L = floor(max.y-min.y/2r)
+
+		min.y,min.z    y1, min.z      y2, min.z         max.y,min.z     min.y, z1        max.y, max.z
+
+		   arr[0]        arr[1]          arr[2]            arr[L]         arr[L+1]          arr[N]
+		 _ _ _ _ _ _    _ _ _ _ _ _    _ _ _ _ _ _        _ _ _ _ _ _    _ _ _ _ _ _       _ _ _ _ _ _
+		|_|_|_|_|_|_|  |_|_|_|_|_|_|  |_|_|_|_|_|_| ...  |_|_|_|_|_|_|  |_|_|_|_|_|_| ... |_|_|_|_|_|_|
+			
+		the final size of grid is M = floor(max.x-min.x/2r)*N points,
+		#floats = 3*floor(max.x-min.x/2r)*floor(max.y-min.y/2r)*floor(max.z-min.z/2r)
+		NOTE: all of the elements are concetenated into one big array of size M
+
+		/the points of the grid represent the centroid of a cube element of side length 2r/
+		*/
+		// WITHOUT TESTING, feels slow at the moment
+		void MLPE_RBP_RIGIDBODY_GEOMETRY::get3Dgrid(MLPE_RBP_RigidBodyGeometryInfo GeometricInfo) {
+			// differntials
+			float Dv = 2 * GeometricInfo.r;
+			// get boundries on each axis - using the vertices of an object
+			std::array<thrust::pair<glm::vec3, uint32_t>, 6> extremumPts = GeometricInfo.getExtremumPoints();
+
+			/*
+			number of points at each axis : x_buffer, y_buffer, z_buffer
+			*/
+			thrust::tuple<uint32_t, uint32_t, uint32_t> gridSizes = getGridSize(extremumPts, Dv);
+
+			// get size of grid and array element
+			get3DgridSize(gridSizes);
+
+			// define the grid and array elements within the grid
+			thrust::device_vector<glm::vec3> fullGrid(grid.gridSize);
+
+			uint32_t xBuffer = thrust::get<0>(grid.gridAxisSize);
+			uint32_t yBuffer = thrust::get<1>(grid.gridAxisSize);
+			uint32_t zBuffer = thrust::get<2>(grid.gridAxisSize);
+
+			// create 2D loop on y, z coordinates where thrust::tabulate will be applied on 1D array (x Direction)
+			for (int z = 0; z < zBuffer; z++) {
+				for (int y = 0; y < yBuffer; y++) {
+					glm::vec3 initPos = glm::vec3(thrust::get<0>(extremumPts[0]).x + Dv / 2,
+												  thrust::get<0>(extremumPts[2]).y + Dv / 2 + Dv*(float)y,
+										          thrust::get<0>(extremumPts[4]).z + Dv / 2 + Dv*(float)z);
+					// iterators
+					thrust::device_vector<glm::vec3>::iterator itBegin = fullGrid.begin() + y * xBuffer + z * xBuffer * yBuffer;
+					thrust::device_vector<glm::vec3>::iterator itEnd = fullGrid.begin() + xBuffer + y * xBuffer + z * xBuffer * yBuffer;
+					//parallelized operations - create a sequence of vectors
+					thrust::sequence(thrust::device, itBegin, itEnd, initPos, glm::vec3(Dv, 0.0, 0.0));
+				}
+			}
+
+			grid.grid = fullGrid;
+		}
+
+		/*
+		find if a centroid of a sub cube is inside the original object or not
+
+		the algorithm:
+		calculate the number of "windings" of the object around the point to check (each of the centroids)
+		if the point is outside the number of windings will be 0, otherwise it will be a nonzero number (maybe negative)
+		the calculation is done for each centroid individually
+		*/
+
+		// calculation of a poisition of a single point - boolean that returns "true" if the point is inside the object
+		bool MLPE_RBP_RIGIDBODY_GEOMETRY::calcSignedngleForSpecificPoint(glm::vec3 p, std::vector<polygon> polygons) {
+			// caclulate angle for each polygon
+			thrust::device_vector<polygon> device_polys = GeneralUsage::mlpe_gu_copyVector(polygons);
+			thrust::device_vector<float> SignedAngle(polygons.size());
+			thrust::transform(thrust::device, device_polys.begin(), device_polys.end(), SignedAngle.begin(), solidAngle(p));
+
+			// calculate total angle
+			float res = thrust::reduce(thrust::device, SignedAngle.begin(), SignedAngle.end(), 0.0f, thrust::plus<float>());
+			return res >= 2.0f * glm::pi<float>();
+		}
+
+		// return a boolean array for each point  - "true" if the point is inside the object
+		void MLPE_RBP_RIGIDBODY_GEOMETRY::isParticleInsideObject(MLPE_RBP_RigidBodyGeometryInfo GeometricInfo, std::vector<particle>& DC) {
+			// get status of each centroid
+			for (auto Elem : grid.grid) {
+				// if the centroid is inside the object, save it as a part of the particle decomposition of the object.
+				if (calcSignedngleForSpecificPoint(Elem, GeometricInfo.objPolygons)) {
+					// fill the particle data
+					particle p{};
+					p.radius = GeometricInfo.r;
+					p.center = Elem;
+					// save the particle
+					DC.push_back(p);
+				}
+			}			
 		}
 
 		void MLPE_RBP_RIGIDBODY_GEOMETRY::loadGeometry(
@@ -74,12 +191,19 @@ namespace MLPE {
 
 			RigidBodyInfo.geometricInfo.vertices = GeometricInfo.vertices;
 			RigidBodyInfo.geometricInfo.indices = GeometricInfo.indices;
+
+			RigidBodyInfo.geometricInfo.objPolygons = GeometricInfo.objPolygons;
 		}
 
 		void MLPE_RBP_RIGIDBODY_GEOMETRY::decomposeGeomerty(MLPE_RBP_RigidBodyGeometryInfo GeometricInfo) {
-
+			std::vector<particle> objectDecomp;
+			isParticleInsideObject(GeometricInfo, objectDecomp);
+			particleDecomposition.particleDecomposition = objectDecomp;
 		}
 
+		void MLPE_RBP_RIGIDBODY_GEOMETRY::assignParticleDistribution(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
+			RigidBodyInfo.particleDecomposition = particleDecomposition;
+		}
 
 	}
 }
