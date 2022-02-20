@@ -56,19 +56,16 @@ namespace MLPE {
 			massDistribution.massElements = distribVec;
 		}
 
-		void MLPE_RBP_massDistribution::mass(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
-			thrust::device_vector<massElement> massElems_d = copy_vec(massDistribution.massElements);
-			float mass = thrust::reduce(massElems_d.begin(), massElems_d.end(), 0, thrust_add_massElements<massElement>());
+		void MLPE_RBP_massDistribution::Mass(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo, float mass) {
 			RigidBodyInfo.mass = mass;
 		}
 
 
-		glm::vec3 MLPE_RBP_massDistribution::getCenterMass(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
+		void MLPE_RBP_massDistribution::getCenterMass(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
 			thrust::device_vector<massElement> massElems_d = copy_vec(massDistribution.massElements);
 			glm::vec3 sum_vec = thrust::reduce(massElems_d.begin(), massElems_d.end(), glm::vec3(0), thrust_add_Positions<massElement>());
 			sum_vec *= 1 / RigidBodyInfo.mass;
-
-			return sum_vec;
+			massDistribution.centerMass = sum_vec;
 		}
 
 		void MLPE_RBP_massDistribution::massElementsDistribution(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
