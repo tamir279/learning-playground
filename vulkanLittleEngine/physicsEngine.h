@@ -16,6 +16,7 @@
 #include <algorithm>
 
 #define PARTICE_RADIUS 0.1
+#define DT 1E-02
 
 namespace MLPE {
 
@@ -37,6 +38,21 @@ namespace MLPE {
 			return glm::determinant(colMat);
 		}
 
+		// an OR binary operator
+		template<typename T>
+		struct OR : public thrust::binary_function <T, T, T> {
+			__host__ __device__ T operator(T a, T b) {
+				return a | b;
+			}
+		};
+
+		// an AND binary operator
+		template<typename T>
+		struct AND : public thrust::binary_function<T, T, T> {
+			__host__ __device__ T operator(T a, T b) {
+				return a & b;
+			}
+		};
 
 	}
 
@@ -208,6 +224,7 @@ namespace MLPE {
 
 		struct mlpe_rbp_RigidBodyMassDistribution {
 			std::vector<massElement> massElements;
+			glm::vec3 centerMass;
 		};
 
 		struct mlpe_rbp_RigidBodyDynamicsInfo{
@@ -234,11 +251,15 @@ namespace MLPE {
 			-rotation axis + velocity(angular velocity)
 			-rotation angle (degrees)
 			*/
+
+			// constants
 			MLPE_RBP_RigidBodyGeometryInfo geometricInfo;
 			mlpe_rbp_RigidBodyParticleDecomposition particleDecomposition;
 
 			float mass = 0;
 			mlpe_rbp_RigidBodyMassDistribution massDistribution;
+
+			// state of body
 		};
 
 		/*
@@ -339,6 +360,35 @@ namespace MLPE {
 			}
 		};
 
+		// detect collision between two particles
+		struct detectCollisionParticle_Particle {
+			const particle p;
+
+			detectCollisionParticle_Particle(particle _p) : p{ _p } {}
+
+			__host__ __device__ thrust::pair<bool, glm::vec3> operator()(particle p1) {
+				// pi.radus = pj.radius = r for all i, j
+				bool collided = glm::distance(p.center, p1.center) <= 2 * p.radius;
+				// average point
+				glm::vec3 avg = 0.5f * (p.center + p1.center);
+				return thrust::make_pair<bool, glm::vec3>(collided, avg);
+			}
+		};
+
+		// operator for summing over array to find number of true values and false ones
+		struct isTrue {
+			__host__ __device__ bool operator()(thrust::pair<bool, glm::vec3> a) {
+				return thrust::get<0>(a);
+			}
+		};
+
+		// operator for taking only the second parameter of a thrust pair
+		template<typename T1, typename T2>
+		struct secondArgument {
+			__host__ __device__ T2 operator()(thrust::pair<T1, T2> a) {
+				return thrust::get<1>(a);
+			}
+		};
 		/*	
 		-------------------- physics classes --------------------
 		*/
@@ -436,14 +486,14 @@ namespace MLPE {
 			// needed to be initialized for the distribution function
 			distribution massDistrib;
 
-			MLPE_RBP_massDistribution(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo) {
+			MLPE_RBP_massDistribution(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo, float mass) {
+				Mass(RigidBodyInfo, mass);
 				distributeMassElements(RigidBodyInfo);
+				getCenterMass(RigidBodyInfo);
 				massElementsDistribution(RigidBodyInfo);
 			}
 
 			~MLPE_RBP_massDistribution(){}
-
-			glm::vec3 getCenterMass(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo);
 
 		private:
 			/*
@@ -451,7 +501,8 @@ namespace MLPE {
 			input needed to be: thrust::host/device<particle> particleDecomposition
 			*/
 			void distributeMassElements(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo);
-			void mass(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo);
+			void Mass(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo, float mass);
+			void getCenterMass(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo);
 			
 			// copy vector from host vector to thrust device vector to be manipulated in parallel by GPU device 
 			template<typename T>
@@ -467,8 +518,47 @@ namespace MLPE {
 			mlpe_rbp_RigidBodyMassDistribution massDistribution;
 		};
 
-		class MLPE_RBP_forceDistribution {
 
+		class MLPE_RBP_rigidBodyState {
+		public:
+			// time delta
+			float dt = (float)DT;
+			// simulation time - maximum number of time steps is 2^64 - 1 ~ 18*10E19
+			uint64_t t_n;
+
+			// the body state at n, n-1
+			thrust::tuple<glm::vec3, MLPE_RBP_quaternion, glm::vec3, glm::vec3> state_n;
+			thrust::tuple<glm::vec3, MLPE_RBP_quaternion, glm::vec3, glm::vec3> state_n_m_1;
+
+			MLPE_RBP_rigidBodyState() {
+				calculateCenterMass();
+				calculateRotationQuaternion();
+				calculateLinearMomentum();
+				calculateAngularMomentum();
+			}
+			~MLPE_RBP_rigidBodyState() {}
+
+		private:
+			// state at time t
+			void calculateCenterMass();
+			void calculateRotationQuaternion();
+			void calculateLinearMomentum();
+			void calculateAngularMomentum();
+		};
+
+		class MLPE_RBP_COLLISION_DETECTOR {
+		public:
+			
+			thrust::device_vector<glm::vec3> detectCollisionObject_Object(
+				mlpe_rbp_RigidBodyDynamicsInfo OuterObjectInfo,
+				mlpe_rbp_RigidBodyDynamicsInfo ObjectInfo);
+
+		private:
+
+			// plot collision points between one particle of object and another object
+			thrust::device_vector<thrust::pair<bool, glm::vec3>> P_O_checkCollisionPoints(
+				particle p,
+				mlpe_rbp_RigidBodyDynamicsInfo& OuterObjectInfo);
 		};
 		/*
 		.
@@ -479,11 +569,6 @@ namespace MLPE {
 		*/
 		
 
-		class MLPE_RBP_COLLISION_DETECTOR {
-		public:
-			/* MLPE_RBP_RIGIDBODY_GEOMETRY rigidBodyGeometry : to get rigidBodyGeometry.RigidBodyGeometricInfo()
-			                                                          rigidBodyGeometry.RigidBodyParticleDecomposition() */ 
-		};
 
 		class MPE_RBP_RIGIDBODY {
 		public:
