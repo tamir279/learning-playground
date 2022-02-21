@@ -251,6 +251,9 @@ namespace MLPE {
 			-rotation axis + velocity(angular velocity)
 			-rotation angle (degrees)
 			*/
+			// time
+			// simulation time - maximum number of time steps is 2^64 - 1 ~ 18*10E19
+			uint64_t t_n = 0;
 
 			// constants
 			MLPE_RBP_RigidBodyGeometryInfo geometricInfo;
@@ -260,8 +263,15 @@ namespace MLPE {
 			mlpe_rbp_RigidBodyMassDistribution massDistribution;
 
 			// state of body
+			bodyState state;
 		};
 
+		struct bodyState {
+			//          cm position /  rotation /  linear momentum / angular momentum
+			thrust::tuple<glm::vec3, MLPE_RBP_quaternion, glm::vec3, glm::vec3> state;
+			// inverse inertial tensor / force sum / torque / angular velocity
+			thrust::tuple<glm::mat3, glm::vec3, glm::vec3, glm::vec3> auxilaryState;
+		};
 		/*
 		constructed operators for special thrust parallel operations
 		*/
@@ -523,27 +533,52 @@ namespace MLPE {
 		public:
 			// time delta
 			float dt = (float)DT;
-			// simulation time - maximum number of time steps is 2^64 - 1 ~ 18*10E19
-			uint64_t t_n;
 
-			// the body state at n, n-1
-			thrust::tuple<glm::vec3, MLPE_RBP_quaternion, glm::vec3, glm::vec3> state_n;
-			thrust::tuple<glm::vec3, MLPE_RBP_quaternion, glm::vec3, glm::vec3> state_n_m_1;
+			bodyState state_n;
 
-			MLPE_RBP_rigidBodyState() {
-				calculateCenterMass();
-				calculateRotationQuaternion();
-				calculateLinearMomentum();
-				calculateAngularMomentum();
+			MLPE_RBP_rigidBodyState(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
+				if (!RigidBodyInfo.t_n) {
+					initializeState(RigidBodyInfo);
+				}
+				else {
+					getPreviousState(RigidBodyInfo);
+					calculateCenterMass();
+					calculateRotationQuaternion();
+					calculateLinearMomentum();
+					calculateAngularMomentum();
+					calculateTotalForce();
+					calculateTorque();
+					calculateInverseInertiaTensor();
+					calculateAngularVelocity();
+				}
+				updateState(RigidBodyInfo);
 			}
 			~MLPE_RBP_rigidBodyState() {}
 
 		private:
+			// initalize state of body - at time 0
+			void initializeState(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo);
+
+			// get state at time t - dt
+			void getPreviousState(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo);
+
 			// state at time t
 			void calculateCenterMass();
 			void calculateRotationQuaternion();
 			void calculateLinearMomentum();
 			void calculateAngularMomentum();
+			void calculateTotalForce();
+			void calculateTorque();
+			void calculateInverseInertiaTensor();
+			void calculateAngularVelocity();
+
+			// update state
+			void updateState(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo);
+
+			// the body state at n-1
+			bodyState state_n_m_1;
+			// body mass - an input when 
+			float M;
 		};
 
 		class MLPE_RBP_COLLISION_DETECTOR {
