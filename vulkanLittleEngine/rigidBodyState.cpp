@@ -20,7 +20,24 @@
 */
 
 namespace MLPE {
-	namespace rbp {
+	namespace rbp {	
+
+		// calculate Icm 
+		glm::mat3 calculateInitialInertiaTensor(
+			glm::vec3 cm,
+			std::vector<particle> pd,
+			std::vector<massElement> me) {
+
+			thrust::device_vector<glm::vec3> relativeDistance;
+			thrust::device_vector<glm::mat3> kernelMatrix;
+			// get relative distance to center of mass
+			thrust::transform(thrust::device, pd.begin(), pd.end(), relativeDistance.begin(), minus(cm));
+			// calculate kernel matrix for Inertia tensor - m((r^T*r)I - r*r^T)
+			thrust::transform(thrust::device, relativeDistance.begin(), relativeDistance.end(), me.begin(), kernelMatrix.begin(), kernel());
+			// get the inertia matrix - I = sum(m((r^T*r)I - r*r^T)) = sum(kernelMatrix)
+			glm::mat3 I = thrust::reduce(thrust::device, kernelMatrix.begin(), kernelMatrix.end(), glm::mat3(0), GeneralUsage::Plus<glm::mat3>());
+			return I;
+		}
 
 		// t = 0
 		void MLPE_RBP_rigidBodyState::initializeState(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo) {
@@ -38,6 +55,10 @@ namespace MLPE {
 
 			// auxilary parameters
 			// inverse inertia tensor
+			thrust::get<0>(state_n.auxilaryState) = 
+				calculateInitialInertiaTensor(RigidBodyInfo.massDistribution.centerMass,
+											  RigidBodyInfo.particleDecomposition.particleDecomposition,
+											  RigidBodyInfo.massDistribution.massElements);
 			// total force
 			// torque
 			// angular velocity

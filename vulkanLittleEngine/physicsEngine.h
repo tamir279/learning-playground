@@ -41,7 +41,7 @@ namespace MLPE {
 		// an OR binary operator
 		template<typename T>
 		struct OR : public thrust::binary_function <T, T, T> {
-			__host__ __device__ T operator(T a, T b) {
+			__host__ __device__ T operator()(T a, T b) {
 				return a | b;
 			}
 		};
@@ -49,8 +49,16 @@ namespace MLPE {
 		// an AND binary operator
 		template<typename T>
 		struct AND : public thrust::binary_function<T, T, T> {
-			__host__ __device__ T operator(T a, T b) {
+			__host__ __device__ T operator()(T a, T b) {
 				return a & b;
+			}
+		};
+
+		// a summation operator
+		template<typename T>
+		struct Plus : public thrust::binary_function<T, T, T> {
+			__host__ __device__ T operator()(T a, T b) {
+				return a + b;
 			}
 		};
 
@@ -399,6 +407,28 @@ namespace MLPE {
 				return thrust::get<1>(a);
 			}
 		};
+
+		// operator for substracting vectors - calculating position in body coordinates
+		struct minus {
+			// with relation with center of mass
+			const glm::vec3 centerMass;
+			// constructor
+			minus(glm::vec3 _cm) : centerMass{ _cm } {}
+
+			__host__ __device__ glm::vec3 operator()(particle p) {
+				return p.center - centerMass;
+			}
+		};
+
+		// operator to calculate kernal matrix of inertia tensor
+		struct kernel : public thrust::binary_function<glm::vec3, massElement, glm::mat3> {
+			__host__ __device__ glm::mat3 operator()(glm::vec3 r, massElement m)const {
+				// m((r^T*r)I - r*r^T)
+				return m.m * (glm::length2(r) * glm::mat3(1.0f) - glm::outerProduct(r ,r));
+			}
+		};
+
+
 		/*	
 		-------------------- physics classes --------------------
 		*/
@@ -528,6 +558,7 @@ namespace MLPE {
 			mlpe_rbp_RigidBodyMassDistribution massDistribution;
 		};
 
+		// TODO : create force queue and force state
 
 		class MLPE_RBP_rigidBodyState {
 		public:
