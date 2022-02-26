@@ -32,6 +32,16 @@ namespace MLPE {
 			return res;
 		}
 
+		// general use - transform thrust::vector to vector
+		template<typename T>
+		std::vector<T> mlpe_gu_copyBackVector(thrust::device_vector<T> vec) {
+			std::vector<T> th_vec;
+			thrust::copy(vec.begin(), vec.end(), th_vec.begin());
+			std::vector<T> res = th_vec;
+
+			return res;
+		}
+
 		// general use - 3D determinant - for floats/integers only
 		float mlpe_gu_3Ddeterminant(glm::vec3 a, glm::vec3 b, glm::vec3 c) {
 			glm::mat3 colMat = glm::mat3(a, b, c);
@@ -272,6 +282,11 @@ namespace MLPE {
 
 			// state of body
 			bodyState state;
+			bool GravityEnabled = true;
+			float G = 9.81;
+			
+			// collision detection
+			MLPE_RBP_COLLISION_DETECTOR detector;
 		};
 
 		struct bodyState {
@@ -280,6 +295,7 @@ namespace MLPE {
 			// inverse inertial tensor / force sum / torque / angular velocity
 			thrust::tuple<glm::mat3, glm::vec3, glm::vec3, glm::vec3> auxilaryState;
 		};
+
 		/*
 		constructed operators for special thrust parallel operations
 		*/
@@ -330,7 +346,7 @@ namespace MLPE {
 			// define a constant that affects inside operator
 			const T2 type;
 			// initialize struct - constructor
-			extermumOp(T2 _t) : type{_t} {}
+			extremumOp(T2 _t) : type{_t} {}
 
 			__host__ __device__ bool operator()(T1 a, T1 b)const {
 				return (type == "x") ? a.x < b.x : (type == "y") ? a.y < b.y : a.z < b.z;
@@ -445,7 +461,7 @@ namespace MLPE {
 			std::vector<polygon> objPolygons;
 
 			// define the particle size (radius)
-			float r = PARTICE_RADIUS;
+			float r = static_cast<float>(PARTICE_RADIUS);
 
 			// get all extrema points from all axis - minX, maxX, minY, maxY, minZ, maxZ
 			std::array<thrust::pair<glm::vec3, uint32_t>, 6> getExtremumPoints();
@@ -558,8 +574,50 @@ namespace MLPE {
 			mlpe_rbp_RigidBodyMassDistribution massDistribution;
 		};
 
-		// TODO : create force queue and force state
+		// detect collisions and return contact points (if any exist)
+		class MLPE_RBP_COLLISION_DETECTOR {
+		public:
+			
+			thrust::device_vector<glm::vec3> detectCollisionObject_Object(
+				mlpe_rbp_RigidBodyDynamicsInfo OuterObjectInfo,
+				mlpe_rbp_RigidBodyDynamicsInfo ObjectInfo);
 
+		private:
+
+			// plot collision points between one particle of object and another object
+			thrust::device_vector<thrust::pair<bool, glm::vec3>> P_O_checkCollisionPoints(
+				particle p,
+				mlpe_rbp_RigidBodyDynamicsInfo& OuterObjectInfo);
+		};
+
+		// queue for forces at different times, diagram at time t of all the forces applied on the body
+		class MLPE_RBP_ForceStateDiagram {
+		public:
+
+			// force applied on each particle - to calculate change in rotation
+			std::vector<glm::vec3> ForceDistribution;
+			// sum of all forces - to calculate momentum, speed, translation
+			glm::vec3 totalForce_n;
+
+			// for raisig new request for searching outer forces applied on body
+			void updateForceState();
+			// for torque calculations later
+			void updateForceDistribution();
+
+		private:
+			void checkForCollisionForces(std::vector<mlpe_rbp_RigidBodyDynamicsInfo> outerBodies);
+			void checkForUserForceInput();
+			void checkIfGravityEnabled(mlpe_rbp_RigidBodyDynamicsInfo bodyInfo);
+
+			// for collision points - up to maxFroceCapacity = number of particles
+			std::vector<glm::vec3> CollisionForceDiagram;
+			// for initial forces
+			std::vector<glm::vec3> InitialForceDiagram;
+			// for gravity
+			std::vector<glm::vec3> GravitationForceDiagram;
+		};
+
+		// calculates the physical state of a rigid body at time t (step t/DT)
 		class MLPE_RBP_rigidBodyState {
 		public:
 			// time delta
@@ -612,20 +670,6 @@ namespace MLPE {
 			float M;
 		};
 
-		class MLPE_RBP_COLLISION_DETECTOR {
-		public:
-			
-			thrust::device_vector<glm::vec3> detectCollisionObject_Object(
-				mlpe_rbp_RigidBodyDynamicsInfo OuterObjectInfo,
-				mlpe_rbp_RigidBodyDynamicsInfo ObjectInfo);
-
-		private:
-
-			// plot collision points between one particle of object and another object
-			thrust::device_vector<thrust::pair<bool, glm::vec3>> P_O_checkCollisionPoints(
-				particle p,
-				mlpe_rbp_RigidBodyDynamicsInfo& OuterObjectInfo);
-		};
 		/*
 		.
 		.
