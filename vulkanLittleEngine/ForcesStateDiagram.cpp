@@ -25,19 +25,22 @@ namespace MLPE {
 		// TODO : take into account the direction of motion during collision and output the forces and not contact points
 		void MLPE_RBP_ForceStateDiagram::checkForCollisionForces(
 			mlpe_rbp_RigidBodyDynamicsInfo bodyInfo,
-			std::vector<mlpe_rbp_RigidBodyDynamicsInfo> outerBodies) {
+			const std::vector<mlpe_rbp_RigidBodyDynamicsInfo> outerBodies) {
 
 			// check for each body for contact points
 			thrust::device_vector<glm::vec3> contactPts;
 			for (auto body : outerBodies) {
-				// should append points
-				contactPts = bodyInfo.detector.detectCollisionObject_Object(bodyInfo, body);
+				// the contact points
+				thrust::device_vector<glm::vec3> pts = bodyInfo.detector.detectCollisionObject_Object(bodyInfo, body);
+				// concatenate results
+				contactPts.insert(contactPts.end(), pts.begin(), pts.end());
 			}
 			
-			// thrust copy_if to the main vector
-		
+			// copy vector
+			CollisionForceDiagram = GeneralUsage::mlpe_gu_copyBackVector(contactPts);
 		}
 
+		// TODO for later - when user inputs are defined
 		void MLPE_RBP_ForceStateDiagram::checkForUserForceInput() {
 
 		}

@@ -31,19 +31,69 @@ namespace MLPE {
 			thrust::device_vector<glm::vec3> relativeDistance;
 			thrust::device_vector<glm::mat3> kernelMatrix;
 			// get relative distance to center of mass
-			thrust::transform(thrust::device, pd.begin(), pd.end(), relativeDistance.begin(), minus(cm));
+			thrust::transform(
+				thrust::device,
+				pd.begin(),
+				pd.end(),
+				relativeDistance.begin(),
+				minus(cm));
+
 			// calculate kernel matrix for Inertia tensor - m((r^T*r)I - r*r^T)
-			thrust::transform(thrust::device, relativeDistance.begin(), relativeDistance.end(), me.begin(), kernelMatrix.begin(), kernel());
+			thrust::transform(thrust::device,
+				relativeDistance.begin(),
+				relativeDistance.end(),
+				me.begin(),
+				kernelMatrix.begin(),
+				kernel());
+
 			// get the inertia matrix - I = sum(m((r^T*r)I - r*r^T)) = sum(kernelMatrix)
-			glm::mat3 I = thrust::reduce(thrust::device, kernelMatrix.begin(), kernelMatrix.end(), glm::mat3(0), GeneralUsage::Plus<glm::mat3>());
+			glm::mat3 I = thrust::reduce(thrust::device,
+				kernelMatrix.begin(),
+				kernelMatrix.end(),
+				glm::mat3(0),
+				GeneralUsage::Plus<glm::mat3>());
 			return I;
 		}
 
+		/*
+		calculate rotation matrix from unit quaternion q = [cos(t/2), sin(t/2)*n] = [q1, q2, q3, q4]
+		
+		q1 = cos(t/2)
+		q2 = sin(t/2)n_x
+		q3 = sin(t/2)n_y
+		q4 = sin(t/2)n_z
+
+		R =   [[1-2q2^2 - 2q3^2 , 2q1q2 - 2q0q3 , 2q1q3 + 2q0q2],
+			   [2q1q2 + 2q0q3 , 1-2q1^2 - 2q3^2 , 2q2q3 - 2q0q1],
+			   [2q1q3 - 2q0q2 , 2q2q3 + 2q0q1 , 1-2q1^2 - 2q2^2]]
+		*/
+
+		glm::mat3 convertQuaternionToRotationMatrix(MLPE_RBP_quaternion q) {
+			// convert the quaternion into a unit quaternion
+			q.ConvertToRotationQuaternionRepresentation();
+			// map q components
+			float q0 = q.s;
+			float q1 = q.vector.x;
+			float q2 = q.vector.y;
+			float q3 = q.vector.z;
+			// populate the rotation matrix
+			return glm::mat3(1 - 2 * (q2 * q2 + q3 * q3), 2 * (q1 * q2 - q0 * q3), 2 * (q1 * q3 + q0 * q2),
+							 2 * (q1 * q2 + q0 * q3), 1 - 2 * (q1 * q1 + q3 * q3), 2 * (q2 * q3 - q0 * q1),
+						     2 * (q1 * q3 - q0 * q2), 2 * (q2 * q3 + q0 * q1), 1 - 2 * (q1 * q1 + q2 * q2));
+		}
+
 		// t = 0
-		void MLPE_RBP_rigidBodyState::initializeState(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo) {
+		void MLPE_RBP_rigidBodyState::initializeState(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
 			// main parameters of a body state
 			// r_cm
 			thrust::get<0>(state_n.state) = RigidBodyInfo.massDistribution.centerMass;
+			// r0
+			thrust::transform(
+				thrust::device,
+				RigidBodyInfo.particleDecomposition.particleDecomposition.begin(),
+				RigidBodyInfo.particleDecomposition.particleDecomposition.end(),
+				state_n.r0.begin(),
+				minus(RigidBodyInfo.massDistribution.centerMass));
 			// q_obj
 			MLPE_RBP_quaternion q(0, glm::vec3(0, 0, 1));
 			q.ConvertToRotationQuaternionRepresentation();
@@ -54,25 +104,40 @@ namespace MLPE {
 			thrust::get<3>(state_n.state) = glm::vec3(0, 0, 0);
 
 			// auxilary parameters
+			// initial inertia tensor
+			RigidBodyInfo.I0 = glm::inverse(calculateInitialInertiaTensor(
+				RigidBodyInfo.massDistribution.centerMass,
+				RigidBodyInfo.particleDecomposition.particleDecomposition,
+				RigidBodyInfo.massDistribution.massElements));
 			// inverse inertia tensor
-			thrust::get<0>(state_n.auxilaryState) = 
-				calculateInitialInertiaTensor(RigidBodyInfo.massDistribution.centerMass,
-											  RigidBodyInfo.particleDecomposition.particleDecomposition,
-											  RigidBodyInfo.massDistribution.massElements);
+			thrust::get<0>(state_n.auxilaryState) = RigidBodyInfo.I0;
 			// total force
 			// torque
 			// angular velocity
 			thrust::get<3>(state_n.auxilaryState) = glm::vec3(0, 0, 1);
 		}
 
-		void MLPE_RBP_rigidBodyState::getPreviousState(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo) {
+		void MLPE_RBP_rigidBodyState::getPreviousState(const mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo) {
 			state_n_m_1 = RigidBodyInfo.state;
 			M = RigidBodyInfo.mass;
 		}
 
+		// translate body
 		void MLPE_RBP_rigidBodyState::calculateCenterMass() {
 			// r_n = r_(n-1) + DT*v_(n-1) = r_(n-1) + (DT/M)*P_(n-1)
 			thrust::get<0>(state_n.state) = thrust::get<0>(state_n_m_1.state) + (dt / M) * thrust::get<2>(state_n_m_1.state);
+		}
+
+		// r_new = r_cm + q_r*r0*q_r^-1
+		// rotate body
+		void MLPE_RBP_rigidBodyState::calculateParticleCenter(const mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo) {
+			std::vector<particle> updatedLocations(RigidBodyInfo.particleDecomposition.particleDecomposition.size());
+			// initial relative positions of the body particles (in body coordiates)
+			thrust::device_vector<glm::vec3> R0 = state_n.r0;
+			// updated center mass position (body translation)
+			glm::vec3 Rcm = thrust::get<0>(state_n.state);
+			// rotating the initial relative centers
+
 		}
 
 		// TODO : check if it is needed to notmalize and transform into rotation quaternion
@@ -103,8 +168,10 @@ namespace MLPE {
 
 		}
 
-		void MLPE_RBP_rigidBodyState::calculateInverseInertiaTensor() {
-
+		void MLPE_RBP_rigidBodyState::calculateInverseInertiaTensor(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo) {
+			MLPE_RBP_quaternion q_n = thrust::get<1>(state_n.state);
+			glm::mat3 R = convertQuaternionToRotationMatrix(q_n);
+			thrust::get<0>(state_n.auxilaryState) = R * RigidBodyInfo.I0 * glm::transpose(R);
 		}
 
 		void MLPE_RBP_rigidBodyState::calculateAngularVelocity() {
@@ -116,7 +183,7 @@ namespace MLPE {
 			// update state
 			RigidBodyInfo.state = state_n;
 			// update time step
-			RigidBodyInfo.t_n = RigidBodyInfo.t_n + 1;
+			RigidBodyInfo.t_n += 1;
 		}
 	}
 }

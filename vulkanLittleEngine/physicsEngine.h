@@ -72,6 +72,24 @@ namespace MLPE {
 			}
 		};
 
+		// rotate a vector along specific axis by using a unit quaternion
+		struct mlpe_gu_rotate : public thrust::unary_function<glm::vec3, glm::vec3> {
+			const rbp::MLPE_RBP_quaternion rotQuaternion;
+
+			mlpe_gu_rotate(rbp::MLPE_RBP_quaternion _q) : rotQuaternion{ _q } {}
+
+			__host__ __device__ glm::vec3 operator()(glm::vec3 particleCenter) const{
+				// defining the particle quaternion for rotation
+				rbp::MLPE_RBP_quaternion pQuaternion(180, particleCenter);
+				// gives pQuaternion = [cos(180/2), sin(180/2)*particleCenter] = [0, particleCenter]
+				pQuaternion.ConvertToRotationQuaternionRepresentation();
+				// calculate
+				rbp::MLPE_RBP_quaternion rQuaternion = rotQuaternion;
+				pQuaternion = rQuaternion * pQuaternion * rQuaternion.inverse();
+				return pQuaternion.vector;
+			}
+		};
+
 	}
 
 
@@ -281,6 +299,8 @@ namespace MLPE {
 			mlpe_rbp_RigidBodyMassDistribution massDistribution;
 
 			// state of body
+			// initial inertia tensor
+			glm::mat3 I0;
 			bodyState state;
 			bool GravityEnabled = true;
 			float G = 9.81;
@@ -294,6 +314,8 @@ namespace MLPE {
 			thrust::tuple<glm::vec3, MLPE_RBP_quaternion, glm::vec3, glm::vec3> state;
 			// inverse inertial tensor / force sum / torque / angular velocity
 			thrust::tuple<glm::mat3, glm::vec3, glm::vec3, glm::vec3> auxilaryState;
+			// initial body system positions of particle centers
+			thrust::device_vector<glm::mat3> r0;
 		};
 
 		/*
@@ -605,7 +627,9 @@ namespace MLPE {
 			void updateForceDistribution();
 
 		private:
-			void checkForCollisionForces(std::vector<mlpe_rbp_RigidBodyDynamicsInfo> outerBodies);
+			void checkForCollisionForces(
+				mlpe_rbp_RigidBodyDynamicsInfo bodyInfo,
+				const std::vector<mlpe_rbp_RigidBodyDynamicsInfo> outerBodies);
 			void checkForUserForceInput();
 			void checkIfGravityEnabled(mlpe_rbp_RigidBodyDynamicsInfo bodyInfo);
 
@@ -625,6 +649,11 @@ namespace MLPE {
 
 			bodyState state_n;
 
+			
+
+			// IMPORTANT
+			//state_n.r0 = state_n_m_1.r0;
+
 			MLPE_RBP_rigidBodyState(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
 				if (!RigidBodyInfo.t_n) {
 					initializeState(RigidBodyInfo);
@@ -633,11 +662,12 @@ namespace MLPE {
 					getPreviousState(RigidBodyInfo);
 					calculateCenterMass();
 					calculateRotationQuaternion();
+					calculateParticleCenter(RigidBodyInfo);
 					calculateLinearMomentum();
 					calculateAngularMomentum();
 					calculateTotalForce();
 					calculateTorque();
-					calculateInverseInertiaTensor();
+					calculateInverseInertiaTensor(RigidBodyInfo);
 					calculateAngularVelocity();
 				}
 				updateState(RigidBodyInfo);
@@ -646,19 +676,20 @@ namespace MLPE {
 
 		private:
 			// initalize state of body - at time 0
-			void initializeState(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo);
+			void initializeState(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo);
 
 			// get state at time t - dt
 			void getPreviousState(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo);
 
 			// state at time t
 			void calculateCenterMass();
+			void calculateParticleCenter(const mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo);
 			void calculateRotationQuaternion();
 			void calculateLinearMomentum();
 			void calculateAngularMomentum();
 			void calculateTotalForce();
 			void calculateTorque();
-			void calculateInverseInertiaTensor();
+			void calculateInverseInertiaTensor(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo);
 			void calculateAngularVelocity();
 
 			// update state
@@ -696,6 +727,11 @@ namespace MLPE {
 	fluid dynamics
 	*/
 	namespace fd {
+
+	}
+
+	// for the main pipeline
+	namespace pipeline {
 
 	}
 }
