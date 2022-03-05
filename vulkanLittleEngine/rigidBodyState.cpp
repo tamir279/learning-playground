@@ -128,18 +128,6 @@ namespace MLPE {
 			thrust::get<0>(state_n.state) = thrust::get<0>(state_n_m_1.state) + (dt / M) * thrust::get<2>(state_n_m_1.state);
 		}
 
-		// r_new = r_cm + q_r*r0*q_r^-1
-		// rotate body
-		void MLPE_RBP_rigidBodyState::calculateParticleCenter(const mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo) {
-			std::vector<particle> updatedLocations(RigidBodyInfo.particleDecomposition.particleDecomposition.size());
-			// initial relative positions of the body particles (in body coordiates)
-			thrust::device_vector<glm::vec3> R0 = state_n.r0;
-			// updated center mass position (body translation)
-			glm::vec3 Rcm = thrust::get<0>(state_n.state);
-			// rotating the initial relative centers
-
-		}
-
 		// TODO : check if it is needed to notmalize and transform into rotation quaternion
 		void MLPE_RBP_rigidBodyState::calculateRotationQuaternion() {
 			// angular velocity quaternion from previous state
@@ -149,6 +137,37 @@ namespace MLPE {
 			// q_n+1 = q_n + DT/2 w_n*q_n
 			thrust::get<1>(state_n.state) = q_n + (w * q_n) * (dt / 2.0f);
 		}
+
+		// r_new = r_cm + q_r*r0*q_r^-1
+		// rotate body
+		void MLPE_RBP_rigidBodyState::calculateParticleCenter(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
+			thrust::device_vector<particle> updatedLocations(RigidBodyInfo.particleDecomposition.particleDecomposition.size());
+			// initial relative positions of the body particles (in body coordiates)
+			thrust::device_vector<glm::vec3> R0 = state_n.r0;
+			// updated center mass position (body translation)
+			glm::vec3 Rcm = thrust::get<0>(state_n.state);
+			// rotating the initial relative centers
+			thrust::transform(
+				thrust::device,
+				R0.begin(),
+				R0.end(),
+				R0.begin(),
+				GeneralUsage::mlpe_gu_rotate(thrust::get<1>(state_n.state))
+			);
+
+			// add centerMass
+			thrust::transform(
+				thrust::device,
+				R0.begin(),
+				R0.end(),
+				updatedLocations.begin(),
+				GeneralUsage::mlpe_gu_Uadd<glm::vec3>(Rcm)
+			);
+
+			// copy vector to particleDecomposition
+			RigidBodyInfo.particleDecomposition.particleDecomposition = GeneralUsage::mlpe_gu_copyBackVector(updatedLocations);
+		}
+
 
 		void MLPE_RBP_rigidBodyState::calculateLinearMomentum() {
 			// P_n+1 = P_n + DT*F_n

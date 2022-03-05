@@ -90,6 +90,17 @@ namespace MLPE {
 			}
 		};
 
+		// unary addition - the type T have be defined with a '+' operation
+		template<typename T>
+		struct mlpe_gu_Uadd : public thrust::unary_function<T, T> {
+			const T a1;
+			mlpe_gu_Uadd(T _a1) : a1{ _a1 } {}
+
+			__host__ __device__ T operator()(T a2) {
+				return a1 + a2;
+			}
+		};
+
 	}
 
 
@@ -652,7 +663,7 @@ namespace MLPE {
 			
 
 			// IMPORTANT
-			//state_n.r0 = state_n_m_1.r0;
+			// state_n.r0 = state_n_m_1.r0;
 
 			MLPE_RBP_rigidBodyState(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
 				if (!RigidBodyInfo.t_n) {
@@ -679,11 +690,11 @@ namespace MLPE {
 			void initializeState(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo);
 
 			// get state at time t - dt
-			void getPreviousState(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo);
+			void getPreviousState(const mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo);
 
 			// state at time t
 			void calculateCenterMass();
-			void calculateParticleCenter(const mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo);
+			void calculateParticleCenter(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo);
 			void calculateRotationQuaternion();
 			void calculateLinearMomentum();
 			void calculateAngularMomentum();
