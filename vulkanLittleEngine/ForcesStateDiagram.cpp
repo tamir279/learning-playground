@@ -21,6 +21,11 @@
 
 namespace MLPE {
 	namespace rbp {
+		
+		/*
+		TODO : calculate the collision impulse of each particle to particle interaction, neglecting interparticle
+		forces, and particle angular velocity, i.e : for collision point i, bodies 1,2 : J_i = -(1+e)dot(v_r, n)/(1/m1 + 1/m2)
+		*/
 
 		// TODO : take into account the direction of motion during collision and output the forces and not contact points
 		void MLPE_RBP_ForceStateDiagram::checkForCollisionForces(
