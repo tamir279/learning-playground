@@ -25,7 +25,24 @@ namespace MLPE {
 		/*
 		TODO : calculate the collision impulse of each particle to particle interaction, neglecting interparticle
 		forces, and particle angular velocity, i.e : for collision point i, bodies 1,2 : J_i = -(1+e)dot(v_r, n)/(1/m1 + 1/m2)
+		for body pairs k = 1,2 :  Jk = J_i*(contactPt - p_k.center)
 		*/
+
+		// for "looping" over all collision PAIRS and collision points
+		struct J : thrust::unary_function<thrust::tuple<massElement,massElement, glm::vec3>, glm::vec3> {
+			// constant of restitution
+			const float e;
+			// calculate J
+			__host__ __device__
+			glm::vec3 operator()(thrust::tuple<massElement, massElement, glm::vec3> collisionInfo) {
+				// particle masses
+				float m1 = thrust::get<0>(collisionInfo).m;
+				float m2 = thrust::get<1>(collisionInfo).m;
+				// calculate normal direction
+
+
+			}
+		};
 
 		// TODO : take into account the direction of motion during collision and output the forces and not contact points
 		void MLPE_RBP_ForceStateDiagram::checkForCollisionForces(

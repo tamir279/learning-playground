@@ -23,12 +23,21 @@
 namespace MLPE {
 	namespace rbp {
 
+		// TODO : output should be sts::vector<thrust::tuple<bool, massElement, massElement, glm::vec3>> res
+		/*
+		calculate the contact point + add the massElements
+		*/
 		thrust::device_vector<thrust::pair<bool, glm::vec3>> MLPE_RBP_COLLISION_DETECTOR::P_O_checkCollisionPoints(particle p, mlpe_rbp_RigidBodyDynamicsInfo& OuterObjectInfo) {
 			std::vector<particle> OuterObjectParticles = OuterObjectInfo.particleDecomposition.particleDecomposition;
 			thrust::device_vector<particle> OOP_device = GeneralUsage::mlpe_gu_copyVector(OuterObjectParticles);
 			// get boolean product for each particle
 			thrust::device_vector<thrust::pair<bool, glm::vec3>> res(OuterObjectParticles.size());
-			thrust::transform(thrust::device, OOP_device.begin(), OOP_device.end(), res.begin(), detectCollisionParticle_Particle(p));
+			thrust::transform(
+				thrust::device,
+				OOP_device.begin(),
+				OOP_device.end(),
+				res.begin(),
+				detectCollisionParticle_Particle(p));
 			return res;
 		}
 
@@ -46,13 +55,28 @@ namespace MLPE {
 			// can be more parallelized
 			for (auto p : ObjectInfo.particleDecomposition.particleDecomposition) {
 				thrust::device_vector<thrust::pair<bool, glm::vec3>> PTODR = P_O_checkCollisionPoints(p, OuterObjectInfo);
-				thrust::copy_if(thrust::device, PTODR.begin(), PTODR.end(), collision_Pairs.begin() + offset, isTrue());
-				offset += thrust::count_if(thrust::device, PTODR.begin(), PTODR.end(), isTrue());
+				thrust::copy_if(
+					thrust::device,
+					PTODR.begin(),
+					PTODR.end(),
+					collision_Pairs.begin() + offset,
+					isTrue());
+
+				offset += thrust::count_if(
+					thrust::device,
+					PTODR.begin(),
+					PTODR.end(),
+					isTrue());
 			}
 			// create a clean point array that containes all collision points
 			thrust::device_vector<glm::vec3> collision_Pts(offset);
 			// copy points into a "cleaner" array
-			thrust::transform(thrust::device, collision_Pairs.begin(), collision_Pairs.begin() + offset, collision_Pts.begin(), secondArgument<bool, glm::vec3>());
+			thrust::transform(
+				thrust::device,
+				collision_Pairs.begin(),
+				collision_Pairs.begin() + offset,
+				collision_Pts.begin(),
+				secondArgument<bool, glm::vec3>());
 			return collision_Pts;
 		}
 	}

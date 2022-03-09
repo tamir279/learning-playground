@@ -100,7 +100,13 @@ namespace MLPE {
 				return a1 + a2;
 			}
 		};
+		/*
+		// create struct from arbitrary number of types , and structs
+		template<typename... T>
+		struct gather {
 
+		};
+		*/
 	}
 
 
@@ -269,6 +275,7 @@ namespace MLPE {
 			std::vector<float> prob;
 		};
 
+		// TODO : assert particleDecomposition.size() == massElements.size()
 		struct mlpe_rbp_RigidBodyMassDistribution {
 			std::vector<massElement> massElements;
 			glm::vec3 centerMass;
@@ -665,7 +672,10 @@ namespace MLPE {
 			// IMPORTANT
 			// state_n.r0 = state_n_m_1.r0;
 
-			MLPE_RBP_rigidBodyState(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
+			MLPE_RBP_rigidBodyState() {}
+			~MLPE_RBP_rigidBodyState() {}
+
+			void step(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
 				if (!RigidBodyInfo.t_n) {
 					initializeState(RigidBodyInfo);
 				}
@@ -683,7 +693,6 @@ namespace MLPE {
 				}
 				updateState(RigidBodyInfo);
 			}
-			~MLPE_RBP_rigidBodyState() {}
 
 		private:
 			// initalize state of body - at time 0
