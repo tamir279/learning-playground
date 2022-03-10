@@ -434,28 +434,6 @@ namespace MLPE {
 			}
 		};
 
-		// detect collision between two particles
-		struct detectCollisionParticle_Particle {
-			const particle p;
-
-			detectCollisionParticle_Particle(particle _p) : p{ _p } {}
-
-			__host__ __device__ thrust::pair<bool, glm::vec3> operator()(particle p1) {
-				// pi.radus = pj.radius = r for all i, j
-				bool collided = glm::distance(p.center, p1.center) <= 2 * p.radius;
-				// average point
-				glm::vec3 avg = 0.5f * (p.center + p1.center);
-				return thrust::make_pair<bool, glm::vec3>(collided, avg);
-			}
-		};
-
-		// operator for summing over array to find number of true values and false ones
-		struct isTrue {
-			__host__ __device__ bool operator()(thrust::pair<bool, glm::vec3> a) {
-				return thrust::get<0>(a);
-			}
-		};
-
 		// operator for taking only the second parameter of a thrust pair
 		template<typename T1, typename T2>
 		struct secondArgument {
@@ -618,15 +596,15 @@ namespace MLPE {
 		class MLPE_RBP_COLLISION_DETECTOR {
 		public:
 			
-			thrust::device_vector<glm::vec3> detectCollisionObject_Object(
+			thrust::device_vector<thrust::tuple<massElement, massElement, glm::vec3>> detectCollisionObject_Object(
 				mlpe_rbp_RigidBodyDynamicsInfo OuterObjectInfo,
 				mlpe_rbp_RigidBodyDynamicsInfo ObjectInfo);
 
 		private:
 
 			// plot collision points between one particle of object and another object
-			thrust::device_vector<thrust::pair<bool, glm::vec3>> P_O_checkCollisionPoints(
-				particle p,
+			thrust::device_vector<thrust::tuple<bool, massElement, massElement, glm::vec3>> P_O_checkCollisionPoints(
+				massElement m,
 				mlpe_rbp_RigidBodyDynamicsInfo& OuterObjectInfo);
 		};
 

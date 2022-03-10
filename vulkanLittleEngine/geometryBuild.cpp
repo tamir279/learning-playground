@@ -22,6 +22,11 @@
 namespace MLPE {
 	namespace rbp {
 
+		// for cleaner code
+		typedef mlpe_rbp_RigidBodyDynamicsInfo body;
+		typedef MLPE_RBP_RigidBodyGeometryInfo geometry;
+		typedef thrust::device_vector<glm::vec3>::iterator glmIt;
+
 		// decide on type
 		template<typename T>
 		bool MLPE_RBP_RigidBodyGeometryInfo::extremumType(T type) {
@@ -40,7 +45,7 @@ namespace MLPE {
 		// class geometric info - find general extremum
 		template<typename T1, typename T2>
 		thrust::pair<glm::vec3, uint32_t> MLPE_RBP_RigidBodyGeometryInfo::extremumAlongAxis(T1 typeOfExtremum, T2 axis) {
-			thrust::device_vector<glm::vec3>::iterator it;
+			glmIt it;
 			// for all types of extremum
 			if (extremumType(typeOfExtremum)) {
 				// find maximum
@@ -52,7 +57,7 @@ namespace MLPE {
 			}
 
 			// find index and value
-			uint32_t extrIndex = (uint32_t)(it - d_vec.begin());
+			uint32_t extrIndex = static_cast<uint32_t>(it - VDV.begin());
 			glm::vec3 extrVec = *it;
 
 			// make pair
@@ -110,7 +115,7 @@ namespace MLPE {
 		/the points of the grid represent the centroid of a cube element of side length 2r/
 		*/
 		// WITHOUT TESTING, feels slow at the moment
-		void MLPE_RBP_RIGIDBODY_GEOMETRY::get3Dgrid(MLPE_RBP_RigidBodyGeometryInfo GeometricInfo) {
+		void MLPE_RBP_RIGIDBODY_GEOMETRY::get3Dgrid(geometry GeometricInfo) {
 			// differntials
 			float Dv = 2 * GeometricInfo.r;
 			// get boundries on each axis - using the vertices of an object
@@ -132,14 +137,14 @@ namespace MLPE {
 			uint32_t zBuffer = thrust::get<2>(grid.gridAxisSize);
 
 			// create 2D loop on y, z coordinates where thrust::tabulate will be applied on 1D array (x Direction)
-			for (int z = 0; z < zBuffer; z++) {
-				for (int y = 0; y < yBuffer; y++) {
+			for (uint32_t z = 0; z < zBuffer; z++) {
+				for (uint32_t y = 0; y < yBuffer; y++) {
 					glm::vec3 initPos = glm::vec3(thrust::get<0>(extremumPts[0]).x + Dv / 2,
 												  thrust::get<0>(extremumPts[2]).y + Dv / 2 + Dv*(float)y,
 										          thrust::get<0>(extremumPts[4]).z + Dv / 2 + Dv*(float)z);
 					// iterators
-					thrust::device_vector<glm::vec3>::iterator itBegin = fullGrid.begin() + y * xBuffer + z * xBuffer * yBuffer;
-					thrust::device_vector<glm::vec3>::iterator itEnd = fullGrid.begin() + xBuffer + y * xBuffer + z * xBuffer * yBuffer;
+					glmIt itBegin = fullGrid.begin() + y * xBuffer + z * xBuffer * yBuffer;
+					glmIt itEnd = fullGrid.begin() + xBuffer + y * xBuffer + z * xBuffer * yBuffer;
 					//parallelized operations - create a sequence of vectors
 					thrust::sequence(thrust::device, itBegin, itEnd, initPos, glm::vec3(Dv, 0.0, 0.0));
 				}
@@ -170,7 +175,7 @@ namespace MLPE {
 		}
 
 		// return a boolean array for each point  - "true" if the point is inside the object
-		void MLPE_RBP_RIGIDBODY_GEOMETRY::isParticleInsideObject(MLPE_RBP_RigidBodyGeometryInfo GeometricInfo, std::vector<particle>& DC) {
+		void MLPE_RBP_RIGIDBODY_GEOMETRY::isParticleInsideObject(geometry GeometricInfo, std::vector<particle>& DC) {
 			// get status of each centroid
 			for (auto Elem : grid.grid) {
 				// if the centroid is inside the object, save it as a part of the particle decomposition of the object.
@@ -185,9 +190,7 @@ namespace MLPE {
 			}			
 		}
 
-		void MLPE_RBP_RIGIDBODY_GEOMETRY::loadGeometry(
-			MLPE_RBP_RigidBodyGeometryInfo GeometricInfo,
-			mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
+		void MLPE_RBP_RIGIDBODY_GEOMETRY::loadGeometry(geometry GeometricInfo, body& RigidBodyInfo) {
 
 			RigidBodyInfo.geometricInfo.vertices = GeometricInfo.vertices;
 			RigidBodyInfo.geometricInfo.indices = GeometricInfo.indices;
@@ -195,13 +198,13 @@ namespace MLPE {
 			RigidBodyInfo.geometricInfo.objPolygons = GeometricInfo.objPolygons;
 		}
 
-		void MLPE_RBP_RIGIDBODY_GEOMETRY::decomposeGeomerty(MLPE_RBP_RigidBodyGeometryInfo GeometricInfo) {
+		void MLPE_RBP_RIGIDBODY_GEOMETRY::decomposeGeomerty(geometry GeometricInfo) {
 			std::vector<particle> objectDecomp;
 			isParticleInsideObject(GeometricInfo, objectDecomp);
 			particleDecomposition.particleDecomposition = objectDecomp;
 		}
 
-		void MLPE_RBP_RIGIDBODY_GEOMETRY::assignParticleDistribution(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
+		void MLPE_RBP_RIGIDBODY_GEOMETRY::assignParticleDistribution(body& RigidBodyInfo) {
 			RigidBodyInfo.particleDecomposition = particleDecomposition;
 		}
 

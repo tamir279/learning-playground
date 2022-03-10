@@ -22,6 +22,11 @@
 namespace MLPE {
 	namespace rbp {
 		
+		// for cleaner code
+		//                   current body  outer body   contact point
+		typedef thrust::tuple<massElement, massElement, glm::vec3> colPair;
+		typedef mlpe_rbp_RigidBodyDynamicsInfo body;
+		typedef std::vector<mlpe_rbp_RigidBodyDynamicsInfo> bodies;
 		/*
 		TODO : calculate the collision impulse of each particle to particle interaction, neglecting interparticle
 		forces, and particle angular velocity, i.e : for collision point i, bodies 1,2 : J_i = -(1+e)dot(v_r, n)/(1/m1 + 1/m2)
@@ -29,25 +34,26 @@ namespace MLPE {
 		*/
 
 		// for "looping" over all collision PAIRS and collision points
-		struct J : thrust::unary_function<thrust::tuple<massElement,massElement, glm::vec3>, glm::vec3> {
+		struct J : thrust::unary_function<colPair, glm::vec3> {
 			// constant of restitution
 			const float e;
 			// calculate J
 			__host__ __device__
-			glm::vec3 operator()(thrust::tuple<massElement, massElement, glm::vec3> collisionInfo) {
+			glm::vec3 operator()(colPair collisionInfo) {
+				// get contact point
+				glm::vec3 cp = thrust::get<2>(collisionInfo);
 				// particle masses
 				float m1 = thrust::get<0>(collisionInfo).m;
 				float m2 = thrust::get<1>(collisionInfo).m;
 				// calculate normal direction
-
+				// calculate impulse direction
+				glm::vec3 J_hat= glm::normalize(thrust::get<0>(collisionInfo).particle.center - cp);
 
 			}
 		};
 
 		// TODO : take into account the direction of motion during collision and output the forces and not contact points
-		void MLPE_RBP_ForceStateDiagram::checkForCollisionForces(
-			mlpe_rbp_RigidBodyDynamicsInfo bodyInfo,
-			const std::vector<mlpe_rbp_RigidBodyDynamicsInfo> outerBodies) {
+		void MLPE_RBP_ForceStateDiagram::checkForCollisionForces(body bodyInfo, const bodies outerBodies) {
 
 			// check for each body for contact points
 			thrust::device_vector<glm::vec3> contactPts;
@@ -67,7 +73,7 @@ namespace MLPE {
 
 		}
 
-		void MLPE_RBP_ForceStateDiagram::checkIfGravityEnabled(mlpe_rbp_RigidBodyDynamicsInfo bodyInfo) {
+		void MLPE_RBP_ForceStateDiagram::checkIfGravityEnabled(body bodyInfo) {
 			thrust::device_vector<glm::vec3> gravityDistribution;
 			// check if gravity is enabled in the simulation
 			glm::vec3 gravity = (bodyInfo.GravityEnabled) ? bodyInfo.G * glm::vec3(0, 0, -1.0f) : glm::vec3(0);
