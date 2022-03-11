@@ -23,9 +23,6 @@
 namespace MLPE {
 	namespace rbp {
 
-		// for cleaner code
-		typedef mlpe_rbp_RigidBodyDynamicsInfo body;
-
 		template<typename T>
 		thrust::device_vector<T> MLPE_RBP_massDistribution::copy_vec(std::vector<T> vec) {
 			thrust::host_vector<T> th_vec;
@@ -51,7 +48,7 @@ namespace MLPE {
 		}
 
 		// needed to build a mass element - mass per particle + particle - from RigidBodyInfo
-		void MLPE_RBP_massDistribution::distributeMassElements(body RigidBodyInfo) {
+		void MLPE_RBP_massDistribution::distributeMassElements(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo) {
 			checkVector(massDistrib.prob);
 			// define transformed vectors
 			std::vector<float> prob;
@@ -74,12 +71,12 @@ namespace MLPE {
 			massDistribution.massElements = distribVec;
 		}
 
-		void MLPE_RBP_massDistribution::Mass(body& RigidBodyInfo, float mass) {
+		void MLPE_RBP_massDistribution::Mass(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo, float mass) {
 			RigidBodyInfo.mass = mass;
 		}
 
 
-		void MLPE_RBP_massDistribution::getCenterMass(body& RigidBodyInfo) {
+		void MLPE_RBP_massDistribution::getCenterMass(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
 			thrust::device_vector<massElement> massElems_d = copy_vec(massDistribution.massElements);
 			glm::vec3 sum_vec = thrust::reduce(
 				massElems_d.begin(),
@@ -90,7 +87,7 @@ namespace MLPE {
 			massDistribution.centerMass = sum_vec;
 		}
 
-		void MLPE_RBP_massDistribution::massElementsDistribution(body& RigidBodyInfo) {
+		void MLPE_RBP_massDistribution::massElementsDistribution(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
 			RigidBodyInfo.massDistribution = massDistribution;
 		}
 		

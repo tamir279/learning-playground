@@ -17,6 +17,8 @@
 
 #define PARTICE_RADIUS 0.1
 #define DT 1E-02
+#define G 9.81
+#define E 0.5
 
 namespace MLPE {
 
@@ -309,6 +311,12 @@ namespace MLPE {
 			// simulation time - maximum number of time steps is 2^64 - 1 ~ 18*10E19
 			uint64_t t_n = 0;
 
+			// general constants
+			/*
+			float G = 9.81;
+			float e = 0.5;
+			*/
+
 			// constants
 			MLPE_RBP_RigidBodyGeometryInfo geometricInfo;
 			mlpe_rbp_RigidBodyParticleDecomposition particleDecomposition;
@@ -321,10 +329,11 @@ namespace MLPE {
 			glm::mat3 I0;
 			bodyState state;
 			bool GravityEnabled = true;
-			float G = 9.81;
 			
 			// collision detection
 			MLPE_RBP_COLLISION_DETECTOR detector;
+			// force diagram
+			MLPE_RBP_ForceStateDiagram forceState;
 		};
 
 		struct bodyState {
@@ -332,6 +341,13 @@ namespace MLPE {
 			thrust::tuple<glm::vec3, MLPE_RBP_quaternion, glm::vec3, glm::vec3> state;
 			// inverse inertial tensor / force sum / torque / angular velocity
 			thrust::tuple<glm::mat3, glm::vec3, glm::vec3, glm::vec3> auxilaryState;
+			// forces state
+			thrust::tuple<
+				thrust::device_vector<glm::vec3>,
+				thrust::device_vector<glm::vec3>,
+				thrust::device_vector<glm::vec3>> forceDiagram;
+			// contact points
+			thrust::device_vector<glm::vec3> contactPts;
 			// initial body system positions of particle centers
 			thrust::device_vector<glm::mat3> r0;
 		};
@@ -613,14 +629,17 @@ namespace MLPE {
 		public:
 
 			// force applied on each particle - to calculate change in rotation
-			std::vector<glm::vec3> ForceDistribution;
-			// sum of all forces - to calculate momentum, speed, translation
-			glm::vec3 totalForce_n;
+			thrust::tuple<
+				thrust::device_vector<glm::vec3>,
+				thrust::device_vector<glm::vec3>,
+				thrust::device_vector<glm::vec3>> ForceDistribution;
+			// all contact points
+			thrust::device_vector<glm::vec3> contactPoints;
 
 			// for raisig new request for searching outer forces applied on body
-			void updateForceState();
-			// for torque calculations later
-			void updateForceDistribution();
+			void getForceState(
+				mlpe_rbp_RigidBodyDynamicsInfo bodyInfo,
+				const std::vector<mlpe_rbp_RigidBodyDynamicsInfo> outerBodies);
 
 		private:
 			void checkForCollisionForces(
@@ -630,11 +649,11 @@ namespace MLPE {
 			void checkIfGravityEnabled(mlpe_rbp_RigidBodyDynamicsInfo bodyInfo);
 
 			// for collision points - up to maxFroceCapacity = number of particles
-			std::vector<glm::vec3> CollisionForceDiagram;
+			thrust::device_vector<glm::vec3> CollisionForceDiagram;
 			// for initial forces
-			std::vector<glm::vec3> InitialForceDiagram;
+			thrust::device_vector<glm::vec3> InitialForceDiagram;
 			// for gravity
-			std::vector<glm::vec3> GravitationForceDiagram;
+			thrust::device_vector<glm::vec3> GravitationForceDiagram;
 		};
 
 		// calculates the physical state of a rigid body at time t (step t/DT)
@@ -645,27 +664,28 @@ namespace MLPE {
 
 			bodyState state_n;
 
-			
-
 			// IMPORTANT
 			// state_n.r0 = state_n_m_1.r0;
 
 			MLPE_RBP_rigidBodyState() {}
 			~MLPE_RBP_rigidBodyState() {}
 
-			void step(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
+			void step(
+				mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo,
+				const std::vector<mlpe_rbp_RigidBodyDynamicsInfo> outerBodies) {
 				if (!RigidBodyInfo.t_n) {
 					initializeState(RigidBodyInfo);
 				}
 				else {
 					getPreviousState(RigidBodyInfo);
+					calculateForceDistribution(RigidBodyInfo, outerBodies);
 					calculateCenterMass();
 					calculateRotationQuaternion();
 					calculateParticleCenter(RigidBodyInfo);
 					calculateLinearMomentum();
 					calculateAngularMomentum();
 					calculateTotalForce();
-					calculateTorque();
+					calculateTorque(RigidBodyInfo);
 					calculateInverseInertiaTensor(RigidBodyInfo);
 					calculateAngularVelocity();
 				}
@@ -685,8 +705,11 @@ namespace MLPE {
 			void calculateRotationQuaternion();
 			void calculateLinearMomentum();
 			void calculateAngularMomentum();
+			void calculateForceDistribution(
+				mlpe_rbp_RigidBodyDynamicsInfo bodyInfo,
+				const std::vector<mlpe_rbp_RigidBodyDynamicsInfo> outerBodies);
 			void calculateTotalForce();
-			void calculateTorque();
+			void calculateTorque(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo);
 			void calculateInverseInertiaTensor(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo);
 			void calculateAngularVelocity();
 

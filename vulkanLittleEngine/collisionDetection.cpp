@@ -26,7 +26,6 @@ namespace MLPE {
 		// for cleaner code
 		typedef thrust::tuple<bool, massElement, massElement, glm::vec3> collisionTuple;
 		typedef thrust::tuple<massElement, massElement, glm::vec3> collisionPair;
-		typedef mlpe_rbp_RigidBodyDynamicsInfo body;
 
 		// detect collision between two particles
 		struct detectCollisionParticle_Particle {
@@ -61,7 +60,10 @@ namespace MLPE {
 		calculate the contact point + add the massElements
 		*/
 
-		thrust::device_vector<collisionTuple> MLPE_RBP_COLLISION_DETECTOR::P_O_checkCollisionPoints(massElement m, body& OuterObjectInfo) {
+		thrust::device_vector<collisionTuple> MLPE_RBP_COLLISION_DETECTOR::P_O_checkCollisionPoints(
+			massElement m,
+			mlpe_rbp_RigidBodyDynamicsInfo& OuterObjectInfo) {
+
 			std::vector<massElement> OuterObjectParticles = OuterObjectInfo.massDistribution.massElements;
 			thrust::device_vector<massElement> OOP_device = GeneralUsage::mlpe_gu_copyVector(OuterObjectParticles);
 			// get boolean product for each particle
@@ -77,7 +79,8 @@ namespace MLPE {
 
 		// TODO : check when there are no points of collision
 		thrust::device_vector<collisionPair> MLPE_RBP_COLLISION_DETECTOR::detectCollisionObject_Object(
-			body OuterObjectInfo, body ObjectInfo) {
+			mlpe_rbp_RigidBodyDynamicsInfo OuterObjectInfo,
+			mlpe_rbp_RigidBodyDynamicsInfo ObjectInfo) {
 
 			// maximum number of collision points available
 			int MAX_SIZE = ObjectInfo.massDistribution.massElements.size() * 

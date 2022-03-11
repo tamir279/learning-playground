@@ -23,8 +23,6 @@ namespace MLPE {
 	namespace rbp {
 
 		// for cleaner code
-		typedef mlpe_rbp_RigidBodyDynamicsInfo body;
-		typedef MLPE_RBP_RigidBodyGeometryInfo geometry;
 		typedef thrust::device_vector<glm::vec3>::iterator glmIt;
 
 		// decide on type
@@ -115,7 +113,7 @@ namespace MLPE {
 		/the points of the grid represent the centroid of a cube element of side length 2r/
 		*/
 		// WITHOUT TESTING, feels slow at the moment
-		void MLPE_RBP_RIGIDBODY_GEOMETRY::get3Dgrid(geometry GeometricInfo) {
+		void MLPE_RBP_RIGIDBODY_GEOMETRY::get3Dgrid(MLPE_RBP_RigidBodyGeometryInfo GeometricInfo) {
 			// differntials
 			float Dv = 2 * GeometricInfo.r;
 			// get boundries on each axis - using the vertices of an object
@@ -175,7 +173,7 @@ namespace MLPE {
 		}
 
 		// return a boolean array for each point  - "true" if the point is inside the object
-		void MLPE_RBP_RIGIDBODY_GEOMETRY::isParticleInsideObject(geometry GeometricInfo, std::vector<particle>& DC) {
+		void MLPE_RBP_RIGIDBODY_GEOMETRY::isParticleInsideObject(MLPE_RBP_RigidBodyGeometryInfo GeometricInfo, std::vector<particle>& DC) {
 			// get status of each centroid
 			for (auto Elem : grid.grid) {
 				// if the centroid is inside the object, save it as a part of the particle decomposition of the object.
@@ -190,7 +188,9 @@ namespace MLPE {
 			}			
 		}
 
-		void MLPE_RBP_RIGIDBODY_GEOMETRY::loadGeometry(geometry GeometricInfo, body& RigidBodyInfo) {
+		void MLPE_RBP_RIGIDBODY_GEOMETRY::loadGeometry(
+			MLPE_RBP_RigidBodyGeometryInfo GeometricInfo,
+			mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
 
 			RigidBodyInfo.geometricInfo.vertices = GeometricInfo.vertices;
 			RigidBodyInfo.geometricInfo.indices = GeometricInfo.indices;
@@ -198,13 +198,13 @@ namespace MLPE {
 			RigidBodyInfo.geometricInfo.objPolygons = GeometricInfo.objPolygons;
 		}
 
-		void MLPE_RBP_RIGIDBODY_GEOMETRY::decomposeGeomerty(geometry GeometricInfo) {
+		void MLPE_RBP_RIGIDBODY_GEOMETRY::decomposeGeomerty(MLPE_RBP_RigidBodyGeometryInfo GeometricInfo) {
 			std::vector<particle> objectDecomp;
 			isParticleInsideObject(GeometricInfo, objectDecomp);
 			particleDecomposition.particleDecomposition = objectDecomp;
 		}
 
-		void MLPE_RBP_RIGIDBODY_GEOMETRY::assignParticleDistribution(body& RigidBodyInfo) {
+		void MLPE_RBP_RIGIDBODY_GEOMETRY::assignParticleDistribution(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
 			RigidBodyInfo.particleDecomposition = particleDecomposition;
 		}
 

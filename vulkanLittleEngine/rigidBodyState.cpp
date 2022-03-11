@@ -22,14 +22,51 @@
 namespace MLPE {
 	namespace rbp {	
 
+		// for cleaner code
+		typedef thrust::device_vector<glm::vec3> DevicePtVector;
+		typedef thrust::device_vector<particle> DeviceParticleVec;
+		typedef thrust::tuple<DevicePtVector, DevicePtVector, DevicePtVector> devPtVecTuple;
+		typedef thrust::tuple<particle, glm::vec3> particleTuple;
+
+		// summation for thrust zip iterator - 3 individual iterators
+		template<typename T>
+		struct zipPlus {
+			__host__ __device__ T operator()(thrust::tuple<T, T, T> a) {
+				return thrust::get<0>(a) + thrust::get<1>(a) + thrust::get<2>(a);
+			}
+		};
+
+		// summation for thrust zip iterator - 3 individual iterators
+		template<typename T>
+		struct zipBinaryPlus : thrust::binary_function<thrust::tuple<T, T>, thrust::tuple<T, T>, T>{
+			__host__ __device__ T operator()(thrust::tuple<T, T> a , thrust::tuple<T, T> b) {
+
+				T cross_a = glm::cross(thrust::get<0>(a), thrust::get<1>(a));
+				T cross_b = glm::cross(thrust::get<0>(b), thrust::get<1>(b));
+
+				return cross_a + cross_b;
+			}
+		};
+
+		// summation of particle centers cross forces
+		struct zipBinaryParticles{
+			__host__ __device__ glm::vec3 operator()(particleTuple a, particleTuple b) {
+
+				glm::vec3 cross_a = glm::cross(thrust::get<0>(a).center, thrust::get<1>(a));
+				glm::vec3 cross_b = glm::cross(thrust::get<0>(b).center, thrust::get<1>(b));
+
+				return cross_a + cross_b;
+			}
+		};
+
 		// calculate Icm 
 		glm::mat3 calculateInitialInertiaTensor(
 			glm::vec3 cm,
 			std::vector<particle> pd,
 			std::vector<massElement> me) {
 
-			thrust::device_vector<glm::vec3> relativeDistance;
-			thrust::device_vector<glm::mat3> kernelMatrix;
+			DevicePtVector relativeDistance;
+			DevicePtVector kernelMatrix;
 			// get relative distance to center of mass
 			thrust::transform(
 				thrust::device,
@@ -111,8 +148,34 @@ namespace MLPE {
 				RigidBodyInfo.massDistribution.massElements));
 			// inverse inertia tensor
 			thrust::get<0>(state_n.auxilaryState) = RigidBodyInfo.I0;
-			// total force
-			// torque
+			/*
+			force state
+			*/
+			DevicePtVector gForce;
+			DevicePtVector collForce;
+			DevicePtVector InitForce;
+			// get gravity
+			glm::vec3 gravity = (RigidBodyInfo.GravityEnabled) ? static_cast<float>(G) * glm::vec3(0, 0, -1.0f) : glm::vec3(0);
+			// fill
+			thrust::fill(thrust::device, gForce.begin(), gForce.end(), gravity);
+			collForce.push_back(glm::vec3(0));
+			InitForce.push_back(glm::vec3(0));
+
+			thrust::get<0>(state_n.forceDiagram) = collForce;
+			thrust::get<1>(state_n.forceDiagram) = InitForce;
+			thrust::get<2>(state_n.forceDiagram) = gForce;
+			/*
+			total force
+			*/
+			thrust::get<1>(state_n.auxilaryState) = thrust::reduce(
+				thrust::device,
+				gForce.begin(),
+				gForce.end(),
+				glm::vec3(0),
+				GeneralUsage::Plus<glm::vec3>());
+			/*
+			torque
+			*/
 			// angular velocity
 			thrust::get<3>(state_n.auxilaryState) = glm::vec3(0, 0, 1);
 		}
@@ -120,6 +183,15 @@ namespace MLPE {
 		void MLPE_RBP_rigidBodyState::getPreviousState(const mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo) {
 			state_n_m_1 = RigidBodyInfo.state;
 			M = RigidBodyInfo.mass;
+		}
+
+		void MLPE_RBP_rigidBodyState::calculateForceDistribution(
+			mlpe_rbp_RigidBodyDynamicsInfo bodyInfo,
+			const std::vector<mlpe_rbp_RigidBodyDynamicsInfo> outerBodies) {
+
+			bodyInfo.forceState.getForceState(bodyInfo, outerBodies);
+			state_n.forceDiagram = bodyInfo.forceState.ForceDistribution;
+			state_n.contactPts = bodyInfo.forceState.contactPoints;
 		}
 
 		// translate body
@@ -141,9 +213,9 @@ namespace MLPE {
 		// r_new = r_cm + q_r*r0*q_r^-1
 		// rotate body
 		void MLPE_RBP_rigidBodyState::calculateParticleCenter(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
-			thrust::device_vector<particle> updatedLocations(RigidBodyInfo.particleDecomposition.particleDecomposition.size());
+			DeviceParticleVec updatedLocations(RigidBodyInfo.particleDecomposition.particleDecomposition.size());
 			// initial relative positions of the body particles (in body coordiates)
-			thrust::device_vector<glm::vec3> R0 = state_n.r0;
+			DevicePtVector R0 = state_n.r0;
 			// updated center mass position (body translation)
 			glm::vec3 Rcm = thrust::get<0>(state_n.state);
 			// rotating the initial relative centers
@@ -180,11 +252,48 @@ namespace MLPE {
 		}
 
 		void MLPE_RBP_rigidBodyState::calculateTotalForce() {
-
+			auto Fc = thrust::get<0>(state_n.forceDiagram);
+			auto Fi = thrust::get<1>(state_n.forceDiagram);
+			auto Fg = thrust::get<2>(state_n.forceDiagram);
+			
+			// computing results individually
+			DevicePtVector results(Fc.size());
+			// iterators
+			auto firstIt = thrust::make_zip_iterator(Fc.begin(), Fi.begin(), Fg.begin());
+			auto lastIt = thrust::make_zip_iterator(Fc.end(), Fi.end(), Fg.end());
+			// calculate sum vector
+			thrust::transform(thrust::device, firstIt, lastIt, results.begin(), zipPlus<glm::vec3>());
+			// sum over all forces
+			auto res = thrust::reduce(thrust::device, results.begin(), results.end(), glm::vec3(0), GeneralUsage::Plus<glm::vec3>());
+			thrust::get<1>(state_n.auxilaryState) = res;
 		}
 
-		void MLPE_RBP_rigidBodyState::calculateTorque() {
+		// TODO : improve the solution by uniting the two calculations into one big zip iterated computation
+		void MLPE_RBP_rigidBodyState::calculateTorque(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo) {
+			auto Fc = thrust::get<0>(state_n.forceDiagram);
+			auto Fi = thrust::get<1>(state_n.forceDiagram);
+			auto Fg = thrust::get<2>(state_n.forceDiagram);
 
+			// computing torque elements for collision points
+			auto zipFiter = thrust::make_zip_iterator(state_n.contactPts.begin(), Fc.begin());
+			auto zipLiter = thrust::make_zip_iterator(state_n.contactPts.end(), Fc.end());
+			// calculate first result
+			glm::vec3 contactRes = thrust::reduce(thrust::device, zipLiter, zipFiter, glm::vec3(0), zipBinaryPlus<glm::vec3>());
+
+			// compute torque elements for gravity
+			glm::vec3 gravityRes = glm::vec3(0);
+
+			// calculate the result only if there i substential data inside
+			if (RigidBodyInfo.GravityEnabled) {
+				auto particleFIter = RigidBodyInfo.particleDecomposition.particleDecomposition.begin();
+				auto particleLIter = RigidBodyInfo.particleDecomposition.particleDecomposition.end();
+				// zip iterators
+				auto Fiter = thrust::make_zip_iterator(particleFIter, Fg.begin());
+				auto Liter = thrust::make_zip_iterator(particleLIter, Fg.end());
+
+				gravityRes = thrust::reduce(thrust::device, Fiter, Liter, glm::vec3(0), zipBinaryParticles());
+			}
+			thrust::get<2>(state_n.auxilaryState) = gravityRes + contactRes;
 		}
 
 		void MLPE_RBP_rigidBodyState::calculateInverseInertiaTensor(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo) {
