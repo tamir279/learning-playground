@@ -179,17 +179,14 @@ namespace MLPE {
 			checkIfGravityEnabled(bodyInfo);
 
 			// padding sizes
-			thrust::tuple<size_t, size_t, size_t> padSizes = thrust::make_tuple<size_t, size_t, size_t>(
-				bodyInfo.massDistribution.massElements.size() - CollisionForceDiagram.size(),
+			thrust::tuple<size_t, size_t> padSizes = thrust::make_tuple<size_t, size_t>(
 				bodyInfo.massDistribution.massElements.size() - InitialForceDiagram.size(),
 				bodyInfo.massDistribution.massElements.size() - GravitationForceDiagram.size()
 				);
 
 			// neccesary padding
-			padVector(CollisionForceDiagram, glm::vec3(0), thrust::get<0>(padSizes));
-			padVector(InitialForceDiagram, glm::vec3(0), thrust::get<1>(padSizes));
-			padVector(GravitationForceDiagram, glm::vec3(0), thrust::get<2>(padSizes));
-			padVector(contactPoints, glm::vec3(0), bodyInfo.massDistribution.massElements.size() - contactPoints.size());
+			padVector(InitialForceDiagram, glm::vec3(0), thrust::get<0>(padSizes));
+			padVector(GravitationForceDiagram, glm::vec3(0), thrust::get<1>(padSizes));
 
 			devPtVecTuple forceDiag = thrust::make_tuple<devPtVec, devPtVec, devPtVec>(
 				CollisionForceDiagram,

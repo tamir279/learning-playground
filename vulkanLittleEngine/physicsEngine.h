@@ -284,38 +284,9 @@ namespace MLPE {
 		};
 
 		struct mlpe_rbp_RigidBodyDynamicsInfo{
-			// using thrust + glm
-			/*
-			---- constants ----
-			-mass
-			-geometry
-			-Inertia tensor (of body)
-
-			---- state of body (constantly computed) ----
-			-position
-			-time stamp
-			-linear momentum
-			-angular momentum
-			-raw force queue
-			-force decomposition : F = F_radial + F_tangent
-
-			---- derived/computed quantities ----
-			-linear velocity of mass center
-			-center of mass
-			-torque
-			-angular acceleration
-			-rotation axis + velocity(angular velocity)
-			-rotation angle (degrees)
-			*/
 			// time
 			// simulation time - maximum number of time steps is 2^64 - 1 ~ 18*10E19
 			uint64_t t_n = 0;
-
-			// general constants
-			/*
-			float G = 9.81;
-			float e = 0.5;
-			*/
 
 			// constants
 			MLPE_RBP_RigidBodyGeometryInfo geometricInfo;
@@ -482,6 +453,7 @@ namespace MLPE {
 		/*	
 		-------------------- physics classes --------------------
 		*/
+
 
 		/*
 		build a rigid body in space, and decompose into spherical particles
@@ -734,12 +706,13 @@ namespace MLPE {
 
 		class MPE_RBP_RIGIDBODY {
 		public:
-		private:
-			MLPE_RBP_RIGIDBODY_GEOMETRY geometryLoadOut;
-			MLPE_RBP_massDistribution massDistribution;
+			MLPE_RBP_rigidBodyState CurrentState;
 
-			MLPE_RBP_RigidBodyGeometryInfo geometricInfo;
-			mlpe_rbp_RigidBodyParticleDecomposition particleDecomposition;
+			auto getBodyInfo() { return Info; }
+		private:
+			MLPE_RBP_RIGIDBODY_GEOMETRY geometryLoader;
+			MLPE_RBP_massDistribution massDistribution;
+			mlpe_rbp_RigidBodyDynamicsInfo Info;
 		};
 
 	}
@@ -753,6 +726,6 @@ namespace MLPE {
 
 	// for the main pipeline
 	namespace pipeline {
-
+		void mainLoop();
 	}
 }
