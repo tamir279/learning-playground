@@ -20,6 +20,19 @@
 #define G 9.81
 #define E 0.5
 
+/*
+enum for user inputs for the simulation
+*/
+
+// for specific body/environment
+enum class PhysicalVariables {
+	BodyNum,
+	Mass,
+	Friction,
+	SpringConstant,
+	ReynoldsNumber
+};
+
 namespace MLPE {
 
 	namespace GeneralUsage {
@@ -145,44 +158,13 @@ namespace MLPE {
 			~MLPE_RBP_quaternion(){}
 
 			// basic operations
-			/*
-			operation +=
-			*/
 			void operator+=(const MLPE_RBP_quaternion& q);
-
-			/*
-			operation +
-			*/
 			MLPE_RBP_quaternion operator+(const MLPE_RBP_quaternion& q);
-
-			/*
-			operation -=
-			*/
 			void operator-=(const MLPE_RBP_quaternion& q);
-
-			/*
-			operation -
-			*/
 			MLPE_RBP_quaternion operator-(const MLPE_RBP_quaternion& q);
-
-			/*
-			operation *=
-			*/
 			void operator*=(const MLPE_RBP_quaternion& q);
-
-			/*
-			operation *
-			*/
 			MLPE_RBP_quaternion operator*(const MLPE_RBP_quaternion& q);
-
-			/*
-			scalar multiplication *=
-			*/
 			void operator*=(const float scale);
-
-			/*
-			scalar multiplication *
-			*/
 			MLPE_RBP_quaternion operator*(const float scale);
 
 			// specified functions to use for 3d vector rotations
@@ -191,10 +173,6 @@ namespace MLPE {
 			L2 norm ||q||_2
 			*/
 			float Norm();
-
-			/*
-			q' = q/||q||
-			*/
 			void Normalize();
 
 			/*
@@ -217,16 +195,8 @@ namespace MLPE {
 			void ConvertToRotationQuaternionRepresentation();
 
 		private:
-			/*
-			fast square root approximation
-			*/
 			float fastSquareRoot(float num);
-
-			/*
-			convert degrees in s to radians for trigonometric functions
-			*/
 			float DegreesToRadians(float angle);
-
 		};
 
 		/*
@@ -297,7 +267,7 @@ namespace MLPE {
 
 			// state of body
 			// initial inertia tensor
-			glm::mat3 I0;
+			glm::mat3 I0 = glm::mat3(0);
 			bodyState state;
 			bool GravityEnabled = true;
 			
@@ -649,6 +619,9 @@ namespace MLPE {
 					initializeState(RigidBodyInfo);
 				}
 				else {
+
+					if (RigidBodyInfo.t_n == UINT64_MAX) { RigidBodyInfo.t_n = 0; }
+
 					getPreviousState(RigidBodyInfo);
 					calculateForceDistribution(RigidBodyInfo, outerBodies);
 					calculateCenterMass();
@@ -704,15 +677,24 @@ namespace MLPE {
 		
 
 
-		class MPE_RBP_RIGIDBODY {
+		class MLPE_RBP_RIGIDBODY {
 		public:
 			MLPE_RBP_rigidBodyState CurrentState;
 
+			float M;
+
+			void setBodyInfo(mlpe_rbp_RigidBodyDynamicsInfo _Info) { Info = _Info; }
 			auto getBodyInfo() { return Info; }
+
+			void setGeometry(MLPE_RBP_RIGIDBODY_GEOMETRY _gL) { geometryLoader = _gL; }
+			auto getGeometry() { return geometryLoader; }
+
+			void setMassDistrib(MLPE_RBP_massDistribution _mD) { massDistribution = _mD; }
+			auto getMassDistribution() { return massDistribution; }
 		private:
+			mlpe_rbp_RigidBodyDynamicsInfo Info;
 			MLPE_RBP_RIGIDBODY_GEOMETRY geometryLoader;
 			MLPE_RBP_massDistribution massDistribution;
-			mlpe_rbp_RigidBodyDynamicsInfo Info;
 		};
 
 	}
@@ -721,11 +703,18 @@ namespace MLPE {
 	fluid dynamics
 	*/
 	namespace fd {
-
+		// class MLPE_FD_FLUID_PARTICLE
 	}
 
 	// for the main pipeline
 	namespace pipeline {
-		void mainLoop();
+
+		class MLPE_PIPELINE_PIPELINE{
+		public:
+			void init();
+			void mainLoop();
+		private:
+			std::vector<rbp::MLPE_RBP_RIGIDBODY> bodies;
+		};
 	}
 }
