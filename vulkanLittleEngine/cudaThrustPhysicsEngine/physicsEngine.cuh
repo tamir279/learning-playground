@@ -261,7 +261,7 @@ namespace MLPE {
 			//             x dir      y dir     z dir
 			thrust::tuple<uint32_t, uint32_t, uint32_t> gridAxisSize;
 			uint32_t gridSize;
-			thrust::device_vector<glm::vec3> grid;
+			std::vector<glm::vec3> grid;
 		};
 
 		struct mlpe_rbp_RigidBodyParticleDecomposition {
@@ -479,9 +479,6 @@ namespace MLPE {
 			// find extremum along specific axis
 			template<typename T1, typename T2>
 			thrust::pair<glm::vec3, uint32_t> extremumAlongAxis(T1 typeOfExtremum, T2 axis);
-
-			// used to copy vertices into - VDV : Vertex Device Vector
-			thrust::device_vector<glm::vec3> VDV;
 		};
 
 		class MLPE_RBP_RIGIDBODY_GEOMETRY {

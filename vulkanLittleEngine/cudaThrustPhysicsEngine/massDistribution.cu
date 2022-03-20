@@ -50,13 +50,13 @@ namespace MLPE {
 		void MLPE_RBP_massDistribution::distributeMassElements(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo) {
 			checkVector(massDistrib.prob);
 			// define transformed vectors
-			std::vector<float> prob;
+			thrust::device_vector<float> prob;
 			std::vector<massElement> distribVec;
 			// needed to transform massDistrib<float> to massDistrib2<massElement>
 			thrust::transform(
 				thrust::device,
-				massDistrib.prob.begin(),
-				massDistrib.prob.end(),
+				thrust::device_pointer_cast(massDistrib.prob.data()),
+				thrust::device_pointer_cast(massDistrib.prob.data()) + massDistrib.prob.size(),
 				prob.begin(),
 				multiplyByConstant<float>(RigidBodyInfo.mass));
 			//                                massDistrib prob vector (mass of a particle)             particle info
@@ -64,7 +64,7 @@ namespace MLPE {
 				thrust::device,
 				prob.begin(),
 				prob.end(),
-				RigidBodyInfo.particleDecomposition.particleDecomposition.begin(),
+				thrust::device_pointer_cast(RigidBodyInfo.particleDecomposition.particleDecomposition.data()),
 				distribVec.begin(),
 				mElementComb());
 			massDistribution.massElements = distribVec;
@@ -76,10 +76,10 @@ namespace MLPE {
 
 
 		void MLPE_RBP_massDistribution::getCenterMass(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
-			thrust::device_vector<massElement> massElems_d = copy_vec(massDistribution.massElements);
 			glm::vec3 sum_vec = thrust::reduce(
-				massElems_d.begin(),
-				massElems_d.end(),
+				thrust::device,
+				thrust::device_pointer_cast(massDistribution.massElements.data()),
+				thrust::device_pointer_cast(massDistribution.massElements.data()) + massDistribution.massElements.size(),
 				glm::vec3(0),
 				thrust_add_Positions<massElement>());
 			sum_vec *= 1 / RigidBodyInfo.mass;
