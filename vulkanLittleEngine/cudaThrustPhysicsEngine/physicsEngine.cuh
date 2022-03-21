@@ -127,9 +127,13 @@ namespace MLPE {
 
 		// pad a vector with specific value - pad until v has a specific length
 		template<typename T>
-		auto padVector(thrust::device_vector<T>& v, T pad, size_t a) {
-			thrust::device_vector<T> padVec(a);
-			thrust::fill(thrust::device, padVec.begin(), padVec.end(), pad - v.size());
+		auto padVector(std::vector<T>& v, T pad, size_t a) {
+			std::vector<T> padVec(a);
+			thrust::fill(
+				thrust::device,
+				thrust::device_pointer_cast(padVec.data),
+				thrust::device_pointer_cast(padVec.data) + a,
+				pad - v.size());
 			v.insert(v.end(), padVec.begin(), padVec.end());
 		}
 
@@ -309,13 +313,13 @@ namespace MLPE {
 			thrust::tuple<glm::mat3, glm::vec3, glm::vec3, glm::vec3> auxilaryState;
 			// forces state
 			thrust::tuple<
-				thrust::device_vector<glm::vec3>,
-				thrust::device_vector<glm::vec3>,
-				thrust::device_vector<glm::vec3>> forceDiagram;
+				std::vector<glm::vec3>,
+				std::vector<glm::vec3>,
+				std::vector<glm::vec3>> forceDiagram;
 			// contact points
-			thrust::device_vector<glm::vec3> contactPts;
+			std::vector<glm::vec3> contactPts;
 			// initial body system positions of particle centers
-			thrust::device_vector<glm::mat3> r0;
+			std::vector<glm::vec3> r0;
 		};
 
 		/*
@@ -576,14 +580,14 @@ namespace MLPE {
 		class MLPE_RBP_COLLISION_DETECTOR {
 		public:
 
-			thrust::device_vector<thrust::tuple<massElement, massElement, glm::vec3>> detectCollisionObject_Object(
+			std::vector<thrust::tuple<massElement, massElement, glm::vec3>> detectCollisionObject_Object(
 				mlpe_rbp_RigidBodyDynamicsInfo OuterObjectInfo,
 				mlpe_rbp_RigidBodyDynamicsInfo ObjectInfo);
 
 		private:
 
 			// plot collision points between one particle of object and another object
-			thrust::device_vector<thrust::tuple<bool, massElement, massElement, glm::vec3>> P_O_checkCollisionPoints(
+			std::vector<thrust::tuple<bool, massElement, massElement, glm::vec3>> P_O_checkCollisionPoints(
 				massElement m,
 				mlpe_rbp_RigidBodyDynamicsInfo& OuterObjectInfo);
 		};
@@ -594,11 +598,11 @@ namespace MLPE {
 
 			// force applied on each particle - to calculate change in rotation
 			thrust::tuple<
-				thrust::device_vector<glm::vec3>,
-				thrust::device_vector<glm::vec3>,
-				thrust::device_vector<glm::vec3>> ForceDistribution;
+				std::vector<glm::vec3>,
+				std::vector<glm::vec3>,
+				std::vector<glm::vec3>> ForceDistribution;
 			// all contact points
-			thrust::device_vector<glm::vec3> contactPoints;
+			std::vector<glm::vec3> contactPoints;
 
 			// for raisig new request for searching outer forces applied on body
 			void getForceState(
@@ -613,11 +617,11 @@ namespace MLPE {
 			void checkIfGravityEnabled(mlpe_rbp_RigidBodyDynamicsInfo bodyInfo);
 
 			// for collision points - up to maxFroceCapacity = number of particles
-			thrust::device_vector<glm::vec3> CollisionForceDiagram;
+			std::vector<glm::vec3> CollisionForceDiagram;
 			// for initial forces
-			thrust::device_vector<glm::vec3> InitialForceDiagram;
+			std::vector<glm::vec3> InitialForceDiagram;
 			// for gravity
-			thrust::device_vector<glm::vec3> GravitationForceDiagram;
+			std::vector<glm::vec3> GravitationForceDiagram;
 		};
 
 		// calculates the physical state of a rigid body at time t (step t/DT)

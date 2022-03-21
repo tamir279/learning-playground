@@ -61,47 +61,51 @@ namespace MLPE {
 		calculate the contact point + add the massElements
 		*/
 
-		thrust::device_vector<collisionTuple> MLPE_RBP_COLLISION_DETECTOR::P_O_checkCollisionPoints(
+		std::vector<collisionTuple> MLPE_RBP_COLLISION_DETECTOR::P_O_checkCollisionPoints(
 			massElement m,
 			mlpe_rbp_RigidBodyDynamicsInfo& OuterObjectInfo) {
 
-			std::vector<massElement> OuterObjectParticles = OuterObjectInfo.massDistribution.massElements;
-			thrust::device_vector<massElement> OOP_device = GeneralUsage::mlpe_gu_copyVector(OuterObjectParticles);
+			std::vector<massElement> OuterObjectElems = OuterObjectInfo.massDistribution.massElements;
 			// get boolean product for each particle
-			thrust::device_vector<collisionTuple> res(OuterObjectParticles.size());
+			std::vector<collisionTuple> res(OuterObjectElems.size());
 			thrust::transform(
 				thrust::device,
-				OOP_device.begin(),
-				OOP_device.end(),
-				res.begin(),
+				thrust::device_pointer_cast(OuterObjectElems.data()),
+				thrust::device_pointer_cast(OuterObjectElems.data()) + OuterObjectElems.size(),
+				thrust::device_pointer_cast(res.data()),
 				detectCollisionParticle_Particle(m));
 			return res;
 		}
 
 		// TODO : check when there are no points of collision
-		thrust::device_vector<collisionPair> MLPE_RBP_COLLISION_DETECTOR::detectCollisionObject_Object(
+		std::vector<collisionPair> MLPE_RBP_COLLISION_DETECTOR::detectCollisionObject_Object(
 			mlpe_rbp_RigidBodyDynamicsInfo OuterObjectInfo,
 			mlpe_rbp_RigidBodyDynamicsInfo ObjectInfo) {
 
-			thrust::device_vector<collisionTuple> collision_Pairs;
+			std::vector<collisionTuple> collision_Pairs;
 			// can be more parallelized
 			for (auto m : ObjectInfo.massDistribution.massElements) {
-				thrust::device_vector<collisionTuple> temp = P_O_checkCollisionPoints(m, OuterObjectInfo);
-				thrust::device_vector<collisionTuple> PTODR;
-				thrust::remove_copy_if(thrust::device,temp.begin(), temp.end(), PTODR.begin(), isTrue());
+				std::vector<collisionTuple> temp = P_O_checkCollisionPoints(m, OuterObjectInfo);
+				std::vector<collisionTuple> PTODR;
+				thrust::remove_copy_if(
+					thrust::device,
+					thrust::device_pointer_cast(temp.data()),
+					thrust::device_pointer_cast(temp.data()) + temp.size(),
+					thrust::device_pointer_cast(PTODR.data()),
+					isTrue());
 
 				// insert PTODR into the collision pairs
 				collision_Pairs.insert(collision_Pairs.end(), PTODR.begin(), PTODR.end());
 			}
-
+			std::vector<collisionPair> collPairs(collision_Pairs.size());
 			// get rid of the collision flag
 			thrust::transform(
 				thrust::device,
-				collision_Pairs.begin(),
-				collision_Pairs.end(),
-				collision_Pairs.begin(),
+				thrust::device_pointer_cast(collision_Pairs.data()),
+				thrust::device_pointer_cast(collision_Pairs.data()) + collision_Pairs.size(),
+				thrust::device_pointer_cast(collPairs.data()),
 				getCollisionPair());
-			return collision_Pairs;
+			return collPairs;
 		}
 	}
 }
