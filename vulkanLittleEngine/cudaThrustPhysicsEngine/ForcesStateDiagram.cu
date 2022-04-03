@@ -20,7 +20,7 @@
 				 FORCES APPLIED AT TIME T
 */
 
-namespace MLPE {
+namespace MLE::MLPE {
 	namespace rbp {
 
 		// for cleaner code
@@ -28,10 +28,10 @@ namespace MLPE {
 		typedef thrust::tuple<massElement, massElement, glm::vec3> colPair;
 		typedef mlpe_rbp_RigidBodyDynamicsInfo body;
 		typedef std::vector<mlpe_rbp_RigidBodyDynamicsInfo> bodies;
-		typedef thrust::device_vector<colPair> colVec;
+		typedef std::vector<colPair> colVec;
 		typedef thrust::device_vector<glm::vec3> devPtVec;
 		typedef std::vector<glm::vec3> PtVec;
-		typedef thrust::tuple<devPtVec, devPtVec, devPtVec> devPtVecTuple;
+		typedef thrust::tuple<PtVec, PtVec, PtVec> PtVecTuple;
 
 		/*
 		calculate the collision impulse of each particle to particle interaction, neglecting interparticle
@@ -87,7 +87,7 @@ namespace MLPE {
 		};
 
 		void getContactPtsAndOuterVelocities(colVec& contactPts, devPtVec& velocities, body bodyInfo, const bodies outerBodies) {
-			for (auto body : outerBodies) {
+			for (const auto& body : outerBodies) {
 				// the contact points
 				colVec pts = bodyInfo.detector.detectCollisionObject_Object(bodyInfo, body);
 				// create velocity container
@@ -115,25 +115,25 @@ namespace MLPE {
 
 			// calculate forces
 			// container
-			devPtVec forces;
-			devPtVec contacts;
+			PtVec forces;
+			PtVec contacts;
 			// body velocity before collision
 			glm::vec3 v1 = (1 / bodyInfo.mass) * thrust::get<2>(bodyInfo.state.state);
 			// calculate
 			thrust::transform(
 				thrust::device,
-				contactPts.begin(),
-				contactPts.end(),
+				thrust::device_pointer_cast(contactPts.data()),
+				thrust::device_pointer_cast(contactPts.data()) + contactPts.size(),
 				outerVelocities.begin(),
-				forces.begin(),
+				thrust::device_pointer_cast(forces.data()),
 				F(E, v1, DT));
 
 			// get contacts
 			thrust::transform(
 				thrust::device,
-				contactPts.begin(),
-				contactPts.end(),
-				contacts.begin(),
+				thrust::device_pointer_cast(contactPts.data()),
+				thrust::device_pointer_cast(contactPts.data()) + contactPts.size(),
+				thrust::device_pointer_cast(contacts.data()),
 				getSpecific<glm::vec3>(2));
 			// copy vectors
 			CollisionForceDiagram = forces;
@@ -146,13 +146,13 @@ namespace MLPE {
 		}
 
 		void MLPE_RBP_ForceStateDiagram::checkIfGravityEnabled(mlpe_rbp_RigidBodyDynamicsInfo bodyInfo) {
-			devPtVec gravityDistribution;
+			PtVec gravityDistribution;
 			// check if gravity is enabled in the simulation
 			glm::vec3 gravity = (bodyInfo.GravityEnabled) ? static_cast<float>(G) * glm::vec3(0, 0, -1.0f) : glm::vec3(0);
 
 			thrust::fill_n(
 				thrust::device,
-				gravityDistribution.begin(),
+				thrust::device_pointer_cast(gravityDistribution.data()),
 				bodyInfo.particleDecomposition.particleDecomposition.size(),
 				gravity);
 
@@ -173,10 +173,10 @@ namespace MLPE {
 			size_t padSize = bodyInfo.massDistribution.massElements.size();
 
 			// neccesary padding
-			GeneralUsage::padVector(InitialForceDiagram, glm::vec3(0), padSize);
-			GeneralUsage::padVector(GravitationForceDiagram, glm::vec3(0), padSize);
+			GeneralUsage::padVector<glm::vec3>(InitialForceDiagram, glm::vec3(0), padSize);
+			GeneralUsage::padVector<glm::vec3>(GravitationForceDiagram, glm::vec3(0), padSize);
 
-			devPtVecTuple forceDiag = thrust::make_tuple<devPtVec, devPtVec, devPtVec>(
+			PtVecTuple forceDiag = thrust::make_tuple(
 				CollisionForceDiagram,
 				InitialForceDiagram,
 				GravitationForceDiagram);

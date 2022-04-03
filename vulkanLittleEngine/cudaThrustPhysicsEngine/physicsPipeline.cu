@@ -3,7 +3,7 @@
 #include <vector>
 #include "physicsEngine.cuh"
 
-namespace MLPE::pipeline {
+namespace MLE::MLPE::pipeline {
 
 	int tick = static_cast<int>(DT) * 1000;
 
@@ -28,7 +28,7 @@ namespace MLPE::pipeline {
 	void MLPE_PIPELINE_PIPELINE::mainLoop() {
 		while (true) {
 			#pragma unroll(2)
-			for (auto body : bodies) {
+			for (auto& body : bodies) {
 				auto tmpBodyArr = GeneralUsage::eraseElement(bodies, body);
 				auto info = body.getBodyInfo();
 				body.CurrentState.step(info, tmpBodyArr);

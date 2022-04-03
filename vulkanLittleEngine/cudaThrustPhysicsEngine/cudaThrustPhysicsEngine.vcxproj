@@ -153,7 +153,10 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="cudaThrustPhysicsEngine.cpp" />
+    <ClCompile Include="exceptions.cpp" />
+    <ClCompile Include="materialsHandling.cpp" />
     <ClCompile Include="quaternion_math.cpp" />
+    <ClCompile Include="rendererWindow.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="physicsEngine.cuh" />
@@ -162,9 +165,15 @@
     <CudaCompile Include="collisionDetection.cu" />
     <CudaCompile Include="ForcesStateDiagram.cu" />
     <CudaCompile Include="geometryBuild.cu" />
+    <CudaCompile Include="geometryFunctionsTests.cu" />
     <CudaCompile Include="massDistribution.cu" />
     <CudaCompile Include="physicsPipeline.cu" />
     <CudaCompile Include="rigidBodyState.cu" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="exceptionHandling.h" />
+    <ClInclude Include="materials.cuh" />
+    <ClInclude Include="renderer.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

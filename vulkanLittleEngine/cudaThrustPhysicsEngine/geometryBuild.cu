@@ -6,6 +6,7 @@
 #include <array>
 
 #include <thrust/extrema.h>
+#include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/fill.h>
 #include<thrust/transform_scan.h>
@@ -20,7 +21,7 @@
 	 GEOMETRY AND PARTICLE DECOMPOSITION OF AN OBJECT
 */
 
-namespace MLPE {
+namespace MLE::MLPE {
 	namespace rbp {
 
 		// for cleaner code
@@ -37,36 +38,36 @@ namespace MLPE {
 			thrust::host_vector<T> th_vec;
 			thrust::copy(vec.begin(), vec.end(), th_vec.begin());
 			thrust::device_vector<T> res = th_vec;
-
 			return res;
 		}
 
 		// class geometric info - find general extremum
 		template<typename T1, typename T2>
 		thrust::pair<glm::vec3, uint32_t> MLPE_RBP_RigidBodyGeometryInfo::extremumAlongAxis(T1 typeOfExtremum, T2 axis) {
-			glmIt it;
+			glmIt it; int N = (int)(vertices.size());
+			// device pointer for device operations
+			thrust::device_ptr<glm::vec3> devPtr = thrust::device_pointer_cast(vertices.data());
 			// for all types of extremum
 			if (extremumType(typeOfExtremum)) {
 				// find maximum
-				it = thrust::max_element(thrust::device, VDV.begin(), VDV.end(), extremumOp<glm::vec3, std::string>(axis));
+				it = thrust::max_element(thrust::device, devPtr, devPtr + N, extremumOp<glm::vec3, std::string>(axis));
 			}
 			else {
 				// find minimum
-				it = thrust::min_element(thrust::device, VDV.begin(), VDV.end(), extremumOp<glm::vec3, std::string>(axis));
+				it = thrust::min_element(thrust::device, devPtr, devPtr + N, extremumOp<glm::vec3, std::string>(axis));
 			}
 
 			// find index and value
-			uint32_t extrIndex = static_cast<uint32_t>(it - VDV.begin());
+			uint32_t extrIndex = static_cast<uint32_t>(it - vertices.begin());
 			glm::vec3 extrVec = *it;
 
 			// make pair
-			return thrust::make_pair<glm::vec3, uint32_t>(extrVec, extrIndex);
+			return thrust::make_pair(extrVec, extrIndex);
 		}
 
 		// find all extrema points in vertex grid
 		std::array<thrust::pair<glm::vec3, uint32_t>, 6> MLPE_RBP_RigidBodyGeometryInfo::getExtremumPoints() {
 			std::array<thrust::pair<glm::vec3, uint32_t>, 6> points;
-			VDV = copy_vec(vertices);
 			points[0] = extremumAlongAxis("min", "x");
 			points[1] = extremumAlongAxis("max", "x");
 			points[2] = extremumAlongAxis("min", "y");
@@ -84,7 +85,7 @@ namespace MLPE {
 			T1 Y_Buffer = static_cast<T1>(std::floor((thrust::get<0>(extremumPts[3]).y - thrust::get<0>(extremumPts[2]).y) / Dv));
 			T1 Z_Buffer = static_cast<T1>(std::floor((thrust::get<0>(extremumPts[5]).z - thrust::get<0>(extremumPts[4]).z) / Dv));
 
-			return thrust::make_tuple<T1, T1, T1>(X_Buffer, Y_Buffer, Z_Buffer);
+			return thrust::make_tuple(X_Buffer, Y_Buffer, Z_Buffer);
 		}
 
 		// transfer grid size data to grid struct
@@ -128,9 +129,6 @@ namespace MLPE {
 			// get size of grid and array element
 			get3DgridSize(gridSizes);
 
-			// define the grid and array elements within the grid
-			thrust::device_vector<glm::vec3> fullGrid(grid.gridSize);
-
 			uint32_t xBuffer = thrust::get<0>(grid.gridAxisSize);
 			uint32_t yBuffer = thrust::get<1>(grid.gridAxisSize);
 			uint32_t zBuffer = thrust::get<2>(grid.gridAxisSize);
@@ -144,14 +142,12 @@ namespace MLPE {
 						thrust::get<0>(extremumPts[2]).y + Dv / 2 + Dv * (float)y,
 						thrust::get<0>(extremumPts[4]).z + Dv / 2 + Dv * (float)z);
 					// iterators
-					glmIt itBegin = fullGrid.begin() + y * xBuffer + z * xBuffer * yBuffer;
-					glmIt itEnd = fullGrid.begin() + xBuffer + y * xBuffer + z * xBuffer * yBuffer;
+					thrust::device_ptr<glm::vec3> itBegin(grid.grid.data() + y * xBuffer + z * xBuffer * yBuffer);
+					thrust::device_ptr<glm::vec3> itEnd(grid.grid.data() + xBuffer + y * xBuffer + z * xBuffer * yBuffer);
 					//parallelized operations - create a sequence of vectors
 					thrust::sequence(thrust::device, itBegin, itEnd, initPos, glm::vec3(Dv, 0.0, 0.0));
 				}
 			}
-
-			grid.grid = fullGrid;
 		}
 
 		/*
@@ -166,15 +162,12 @@ namespace MLPE {
 		// calculation of a poisition of a single point - boolean that returns "true" if the point is inside the object
 		bool MLPE_RBP_RIGIDBODY_GEOMETRY::calcSignedngleForSpecificPoint(glm::vec3 p, std::vector<polygon> polygons) {
 			// caclulate angle for each polygon
-			thrust::device_vector<polygon> device_polys = GeneralUsage::mlpe_gu_copyVector(polygons);
-			//thrust::device_vector<float> SignedAngle(polygons.size());
-			//thrust::transform(thrust::device, device_polys.begin(), device_polys.end(), SignedAngle.begin(), solidAngle(p));
-
+			std::vector<polygon> devPolys = polygons;
 			// calculate total angle
 			float res = thrust::reduce(
 				thrust::device,
-				thrust::make_transform_iterator(device_polys.begin(), solidAngle(p)),
-				thrust::make_transform_iterator(device_polys.end(), solidAngle(p)),
+				thrust::make_transform_iterator(thrust::device_pointer_cast(devPolys.data()), solidAngle(p)),
+				thrust::make_transform_iterator(thrust::device_pointer_cast(devPolys.data()) + devPolys.size(), solidAngle(p)),
 				0.0f,
 				thrust::plus<float>());
 			return res >= 2.0f * glm::pi<float>();
@@ -183,7 +176,7 @@ namespace MLPE {
 		// return a boolean array for each point  - "true" if the point is inside the object
 		void MLPE_RBP_RIGIDBODY_GEOMETRY::isParticleInsideObject(MLPE_RBP_RigidBodyGeometryInfo GeometricInfo, std::vector<particle>& DC) {
 			// get status of each centroid
-			for (auto Elem : grid.grid) {
+			for (auto& Elem : grid.grid) {
 				// if the centroid is inside the object, save it as a part of the particle decomposition of the object.
 				if (calcSignedngleForSpecificPoint(Elem, GeometricInfo.objPolygons)) {
 					// fill the particle data
@@ -207,9 +200,7 @@ namespace MLPE {
 		}
 
 		void MLPE_RBP_RIGIDBODY_GEOMETRY::decomposeGeomerty(MLPE_RBP_RigidBodyGeometryInfo GeometricInfo) {
-			std::vector<particle> objectDecomp;
-			isParticleInsideObject(GeometricInfo, objectDecomp);
-			particleDecomposition.particleDecomposition = objectDecomp;
+			isParticleInsideObject(GeometricInfo, particleDecomposition.particleDecomposition);
 		}
 
 		void MLPE_RBP_RIGIDBODY_GEOMETRY::assignParticleDistribution(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
