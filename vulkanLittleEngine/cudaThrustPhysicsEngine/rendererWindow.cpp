@@ -61,10 +61,10 @@ namespace MLE::RENDERER {
 		glBindVertexArray(VAO);
 		// bind the VBO with the data itself
 		glBindBuffer(GL_ARRAY_BUFFER, VBO);
-		glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), &vertices[0], GL_STATIC_DRAW);
+		glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), &vertices[0], GL_DYNAMIC_DRAW);
 		// bind the EBO with index data itself
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-		glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), &indices[0], GL_STATIC_DRAW);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), &indices[0], GL_DYNAMIC_DRAW);
 		// bind VBO with vertex shader	
 		// vertex Positions
 		glEnableVertexAttribArray(0);
@@ -77,7 +77,32 @@ namespace MLE::RENDERER {
 		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, TexCoord));
 	}
 
-	void Mesh::draw() {
+	void Mesh::draw(shader &shader) {
+		// for multiple texture layers - suited for PBR
+		unsigned int diffuseNr = 1;
+		unsigned int specularNr = 1;
+		unsigned int normalNr = 1;
+		unsigned int heightNr = 1;
 
+		// bind textures
+		for (unsigned int i = 0; i < textures.size(); i++) {
+			std::string number;
+			std::string name = textures[i].type;
+			// activate texture
+			glActiveTexture(GL_TEXTURE0 + i);
+			// transfer number to string
+			if (name == "texture_diffuse") number = std::to_string(diffuseNr++);
+			else if (name == "texture_specular") number = std::to_string(specularNr++);
+			else if (name == "texture_normal") number = std::to_string(normalNr++);
+			else if (name == "texture_height") number = std::to_string(heightNr++);
+
+			// now set the sampler to the correct texture unit
+			glUniform1i(glGetUniformLocation(shader.ID, (name + number).c_str()), i);
+			// and finally bind the texture
+			glBindTexture(GL_TEXTURE_2D, textures[i].id);
+		}
+		// draw mesh
+		glBindVertexArray(VAO);
+		glDrawElements(GL_TRIANGLES, static_cast<unsigned int>(indices.size()), GL_UNSIGNED_INT, 0);
 	}
 }

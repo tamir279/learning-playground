@@ -156,6 +156,8 @@
     <ClCompile Include="exceptions.cpp" />
     <ClCompile Include="materialsHandling.cpp" />
     <ClCompile Include="quaternion_math.cpp" />
+    <ClCompile Include="randererShader.cpp" />
+    <ClCompile Include="rendererModel.cpp" />
     <ClCompile Include="rendererWindow.cpp" />
   </ItemGroup>
   <ItemGroup>

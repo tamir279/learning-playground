@@ -12,7 +12,7 @@
 		  QUATERNION MATHEMATICS FOR 3D ROTATIONS
 */
 
-namespace MLPE {
+namespace MLE::MLPE {
 	namespace rbp {
 
 		void MLPE_RBP_quaternion::operator+=(const MLPE_RBP_quaternion& q) {

@@ -6,6 +6,10 @@
 #include <GL/gl.h>
 #include <GL/glu.h>
 
+#include <string>
+#include <fstream>
+#include <sstream>
+
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
@@ -73,7 +77,17 @@ namespace MLE {
 		};
 
 		class shader {
-
+		public:
+			unsigned int ID;
+			// shader constructor - for now using only vertex and fragment shaders
+			shader(const char* vertexPath, const char* fragmentPath, const char* geometryPath = nullptr);
+			// use the compiled shader program recognized by ID
+			void use();
+			// set uniform value of certain type
+			template<typename... Args>
+			void setUniformValue(const std::string& name, Args&... values)const;
+		private:
+			void checkCompileErrors(GLuint shader, std::string type);
 		};
 
 		class Mesh {
@@ -97,7 +111,7 @@ namespace MLE {
 				setMesh();
 			}
 
-			void draw();
+			void draw(shader &shader);
 		private:
 			unsigned int EBO, VBO;
 			void setMesh();
@@ -105,8 +119,30 @@ namespace MLE {
 
 		class model {
 		public:
+			std::vector<Texture> loadedTextures;
+			std::vector<Mesh> meshes;
+			std::string directory;
+			bool gammaCorrection;
+
+			// constructor, expects a filepath to a 3D model.
+			model(std::string const& path, bool gamma = false) : gammaCorrection{ gamma } {
+				loadModel(path);
+			}
+
+			// draws the model, and thus all its meshes
+			void draw(shader& shader)
+			{
+				for (auto& mesh : meshes) {
+					mesh.draw(shader);
+				}
+			}
 
 		private:
+			void loadModel(std::string const& path);
+			//void processNode(aiNode* node, const aiScene* scene);
+			//Mesh processMesh(aiMesh* mesh, const aiScene* scene);
+			//std::vector<Texture> loadMaterialTextures(aiMaterial *mat, aiTextureType type, string typeName);
+			unsigned int TextureFromFile(const char* path, const std::string& directory, bool gamma);
 		};
 	}
 }
