@@ -130,12 +130,7 @@ namespace MLE {
 			}
 
 			// draws the model, and thus all its meshes
-			void draw(shader& shader)
-			{
-				for (auto& mesh : meshes) {
-					mesh.draw(shader);
-				}
-			}
+			void draw(shader& shader);
 
 		private:
 			void loadModel(std::string const& path);

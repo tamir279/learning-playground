@@ -11,10 +11,24 @@
 #include <string>
 #include "renderer.h"
 
+#define INSTANCED false
+
 namespace MLE::RENDERER {
 
+	void model::draw(shader& shader)
+	{
+		for (auto& mesh : meshes) {
+		#if defined(INSTANCED) && (INSTANCED)
+			glBindVertexArray(mesh.VAO);
+			glDrawElementsInstanced(GL_TRIANGLES, static_cast<unsigned int>(mesh.indices.size()), GL_UNSIGNED_INT, 0, objects);
+		#else
+			mesh.draw(shader);
+		#endif
+		}
+	}
+
 	GLenum getFormat(int channels) {
-		return !(channels - 1) ? GL_RED : !(channels - 3) ? GL_RGB : !(channels - 4) ? GL_RGBA : GL_GREEN;
+		return (channels == 1) ? GL_RED : (channels == 3) ? GL_RGB : (channels == 4) ? GL_RGBA : GL_GREEN;
 	}
 
 	unsigned int model::TextureFromFile(const char* path, const std::string& directory, bool gamma) {
