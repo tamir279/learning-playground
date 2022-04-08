@@ -9,6 +9,7 @@
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <tuple>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -27,6 +28,66 @@
 */
 
 namespace MLE {
+	// TODO : add resource namespace for managing all non-model data
+	// quaternion class - general
+	class quaternion {
+	public:
+
+		// rotation + vector
+		float s;
+		glm::vec3 vector;
+
+		// build quaternion
+		quaternion(float rotation, glm::vec3 D3Dvector) : s{ rotation }, vector{ D3Dvector } {}
+
+		// overload - optional for defining a quaternion without inputs
+		quaternion() : s{ 0 }, vector{ glm::vec3(0) } {}
+
+		// destructor
+		~quaternion() {}
+
+		// basic operations
+		void operator+=(const quaternion& q);
+		quaternion operator+(const quaternion& q);
+		void operator-=(const quaternion& q);
+		quaternion operator-(const quaternion& q);
+		void operator*=(const quaternion& q);
+		quaternion operator*(const quaternion& q);
+		void operator*=(const float scale);
+		quaternion operator*(const float scale);
+
+		// specified functions to use for 3d vector rotations
+
+		/*
+		L2 norm ||q||_2
+		*/
+		float Norm();
+		void Normalize();
+
+		/*
+		q* = [s, -vector]
+		*/
+		void conjugate();
+		quaternion Conjugate();
+
+		/*
+		q^-1 = q* /||q||^2
+		*/
+		quaternion inverse();
+
+		// convert to rotation in 3d
+
+		/*
+		v' = v/||v||
+		q_unit = [cos(o/2), sin(o/2)v']
+		*/
+		void ConvertToRotationQuaternionRepresentation();
+
+	private:
+		float fastSquareRoot(float num);
+		float DegreesToRadians(float angle);
+	};
+
 	namespace RENDERER {
 
 		// important structs
@@ -47,10 +108,6 @@ namespace MLE {
 		public:
 			WindoW(int w, int h, std::string name);
 			~WindoW();
-
-			// delete constructor
-			WindoW(const WindoW&) = delete;
-			WindoW& operator=(const WindoW&) = delete;
 
 			// window opening and closing
 			bool shouldClose() { return glfwWindowShouldClose(window); }
@@ -73,6 +130,59 @@ namespace MLE {
 		};
 
 		class camera {
+		public:
+			// building blocks for a lookAt transformation
+			glm::vec3 eye;
+			glm::vec3 center;
+			glm::vec3 up;
+
+			// camera response speed
+			float delta;
+			float mouseSensitivity;
+			float FieldOfView;
+
+			camera(glm::vec3 initEye, glm::vec3 initCenter, glm::vec3 initUp, float _speed, float ms) {
+				this->eye = initEye;
+				this->center = initCenter;
+				this->up = initUp;
+				this->delta = _speed;
+				this->mouseSensitivity = ms;
+				this->FieldOfView = 1.0f;
+			}
+
+			// overload for default camera positioning
+			camera() : eye{ glm::vec3(1, 0, 0) }, center{ glm::vec3(0) }, up{ glm::vec3(0, 0, 1) }, delta{ 1 } {
+				this->mouseSensitivity = 0.1;
+				this->FieldOfView = 1.0f;
+			}
+
+			// get transformed view matrix for shader use
+			auto getViewMatrix();
+			// camera keyboard inputs
+			void processKeyboardInput(GLFWwindow* window);
+			// camera mouse inputs
+			void processMouseMovement(float Xoffset, float Yoffset);
+			void processMouseScrolling(float Yoffset);
+			void mousePositionCallBack(GLFWwindow* window, double x, double y);
+			void mouseScrollCallBack(GLFWwindow* window, double Xoffset, double Yoffset);
+			// set from global values
+			void setXYvalues(float X, float Y) { lastX = X; lastY = Y; }
+			auto getXYvalues() { return std::make_tuple(lastX, lastY); }
+
+			// set and get mouse movement flag
+			void setMovementFlag(bool _Move) { firstMove = _Move; }
+			bool getMovementFlag() { return firstMove; }
+
+		private:
+			static float lastX, lastY;
+			static bool firstMove;
+			// process inputs
+			void processKeyboardInput_W_();
+			void processKeyboardInput_A_();
+			void processKeyboardInput_S_();
+			void processKeyboardInput_D_();
+			// rotation
+			void RotateVector(glm::vec3& v, quaternion rotation);
 
 		};
 
@@ -85,7 +195,7 @@ namespace MLE {
 			void use();
 			// set uniform value of certain type
 			template<typename... Args>
-			void setUniformValue(const std::string& name, Args&... values)const;
+			void setUniformValue(const std::string& name, Args&... values);
 		private:
 			void checkCompileErrors(GLuint shader, std::string type);
 		};
@@ -110,6 +220,8 @@ namespace MLE {
 				// set mesh to rendering
 				setMesh();
 			}
+
+			~Mesh();
 
 			void draw(shader &shader);
 		private:

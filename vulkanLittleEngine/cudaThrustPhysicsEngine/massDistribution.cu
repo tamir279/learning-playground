@@ -4,7 +4,6 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <vector>
 #include <array>
-
 #include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
 #include <thrust/generate.h>

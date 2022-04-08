@@ -101,12 +101,13 @@ namespace MLE::RENDERER {
     }
 
     template<typename... Args>
-    void shader::setUniformValue(const std::string& name, Args&... values)const {
+    void shader::setUniformValue(const std::string& name, Args&... values) {
         auto argVec = { values... }; auto x = argVec.begin();
         if constexpr (sizeof...(values) > 1) {
             if (typeid(*x) == typeid(float)) {
                 sizeof ...(values) == 3 ? glUniform3f(glGetUniformLocation(ID, name.c_str()), *x, *(x+1), *(x+2)) :
-                    sizeof...(values) == 4 ? glUniform4f(glGetUniformLocation(ID, name.c_str()), *x, *(x+1), *(x+2), *(x+3));
+                    sizeof...(values) == 4 ? glUniform4f(glGetUniformLocation(ID, name.c_str()), *x, *(x+1), *(x+2), *(x+3))
+                    : std::cout << "type not supported by openGL or GLSL" << std::endl;
             }
         }
         else {
@@ -124,6 +125,7 @@ namespace MLE::RENDERER {
             else if (typeid(*x) == typeid(glm::mat2))glUniform2fv(glGetUniformLocation(ID, name.c_str()), 1, &(*x)[0][0]);
             else if (typeid(*x) == typeid(glm::mat3))glUniform3fv(glGetUniformLocation(ID, name.c_str()), 1, &(*x)[0][0]);
             else if (typeid(*x) == typeid(glm::mat4))glUniform4fv(glGetUniformLocation(ID, name.c_str()), 1, &(*x)[0][0]);
+            else { std::cout << "type not supported by openGL or GLSL" << std::endl; }
         }
     }
 

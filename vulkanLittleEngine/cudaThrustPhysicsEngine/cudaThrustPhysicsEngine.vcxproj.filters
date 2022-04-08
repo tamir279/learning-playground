@@ -39,9 +39,15 @@
     <ClCompile Include="rendererModel.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="rendererCamera.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="physicsEngine.cuh">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="vertexShader.vert">
       <Filter>Source Files</Filter>
     </None>
   </ItemGroup>

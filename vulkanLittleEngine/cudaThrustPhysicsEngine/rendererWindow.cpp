@@ -12,6 +12,8 @@
 #include <GLFW/glfw3native.h>
 #pragma warning(pop)
 
+#include <unordered_map>
+
 #include "renderer.h"
 
 namespace MLE::RENDERER {
@@ -19,7 +21,7 @@ namespace MLE::RENDERER {
 	// window opening and closing
 
 	void WindoW::initWindow() {
-		glfwInit();
+		if (!glfwInit()) { std::cout << "GLFW has failed to initialize!"; }
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 		glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -51,6 +53,11 @@ namespace MLE::RENDERER {
 	}
 
 	// mesh setup and drawing
+	Mesh::~Mesh() {
+		glDeleteVertexArrays(1, &VAO);
+		glDeleteBuffers(1, &VBO);
+		glDeleteBuffers(1, &EBO);
+	}
 
 	void Mesh::setMesh() {
 		// create buffers/arrays
@@ -77,32 +84,37 @@ namespace MLE::RENDERER {
 		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, TexCoord));
 	}
 
-	void Mesh::draw(shader &shader) {
-		// for multiple texture layers - suited for PBR
-		unsigned int diffuseNr = 1;
-		unsigned int specularNr = 1;
-		unsigned int normalNr = 1;
-		unsigned int heightNr = 1;
+	auto setTextureLayerMap() {
+		std::unordered_map<std::string, uint32_t> textureLayers({
+			{ "texture_diffuse" , 1 },
+			{ "texture_specular" , 1 },
+			{ "texture_normal" , 1 },
+			{ "texture_normal" , 1 },
+			{ "texture_height" , 1 } });
 
+		return textureLayers;
+	}
+
+	void Mesh::draw(shader &shader) {
+		// map of texture layers - suited for PBR
+		auto textureMap = setTextureLayerMap();
 		// bind textures
-		for (unsigned int i = 0; i < textures.size(); i++) {
-			std::string number;
+		std::string number;
+		for (uint32_t i = 0; i < textures.size(); i++) {
 			std::string name = textures[i].type;
 			// activate texture
 			glActiveTexture(GL_TEXTURE0 + i);
 			// transfer number to string
-			if (name == "texture_diffuse") number = std::to_string(diffuseNr++);
-			else if (name == "texture_specular") number = std::to_string(specularNr++);
-			else if (name == "texture_normal") number = std::to_string(normalNr++);
-			else if (name == "texture_height") number = std::to_string(heightNr++);
-
+			number = std::to_string((textureMap)[name]++);
 			// now set the sampler to the correct texture unit
 			glUniform1i(glGetUniformLocation(shader.ID, (name + number).c_str()), i);
 			// and finally bind the texture
 			glBindTexture(GL_TEXTURE_2D, textures[i].id);
 		}
+
 		// draw mesh
 		glBindVertexArray(VAO);
-		glDrawElements(GL_TRIANGLES, static_cast<unsigned int>(indices.size()), GL_UNSIGNED_INT, 0);
+		glDrawElements(GL_TRIANGLES, static_cast<uint32_t>(indices.size()), GL_UNSIGNED_INT, 0);
 	}
+
 }

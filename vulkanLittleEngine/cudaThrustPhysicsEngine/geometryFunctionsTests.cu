@@ -6,7 +6,7 @@
 
 typedef std::vector<glm::vec3> ptVec;
 typedef std::vector<uint32_t> indVec;
-typedef std::vector<MLPE::rbp::polygon> polyVec;
+typedef std::vector<MLE::MLPE::rbp::polygon> polyVec;
 typedef std::array<thrust::pair<glm::vec3, uint32_t>, 6> extrArr;
 
 // for vertices
@@ -15,7 +15,7 @@ float yMid = glm::sqrt(2) / 2; float zMid = glm::sqrt(2) / 2;
 // convert indices to polygons - helper
 polyVec convertIndsToPolys(indVec indices, ptVec vertices) {
 	polyVec res;
-	MLPE::rbp::polygon poly;
+	MLE::MLPE::rbp::polygon poly;
 	for (int i = 0; i < indices.size(); i += 3) {
 		poly.polygon = thrust::make_tuple(vertices[indices[i]], vertices[indices[i + 1]], vertices[indices[i + 2]]);
 		res.push_back(poly);
@@ -75,7 +75,7 @@ int main() {
 	/*
 	check extremum points extraction
 	*/
-	MLPE::rbp::MLPE_RBP_RigidBodyGeometryInfo geometryInfo;
+	MLE::MLPE::rbp::MLPE_RBP_RigidBodyGeometryInfo geometryInfo;
 	// input vertices + indices
 	ptVec v = { glm::vec3(0,0,1), glm::vec3(0, yMid, zMid), glm::vec3(0,1,0),
 				glm::vec3(0, yMid, -zMid), glm::vec3(0,0,-1), glm::vec3(0, -yMid, -zMid),
