@@ -15,6 +15,10 @@
 
 namespace MLE::RENDERER {
 
+	void model::loadModel(std::string const& path) {
+
+	}
+
 	void model::draw(shader& shader)
 	{
 		for (auto& mesh : meshes) {

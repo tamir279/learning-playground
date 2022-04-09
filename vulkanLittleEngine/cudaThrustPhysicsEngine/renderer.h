@@ -10,6 +10,7 @@
 #include <fstream>
 #include <sstream>
 #include <tuple>
+#include <unordered_map>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -183,12 +184,12 @@ namespace MLE {
 			void processKeyboardInput_D_();
 			// rotation
 			void RotateVector(glm::vec3& v, quaternion rotation);
-
 		};
 
 		class shader {
 		public:
 			unsigned int ID;
+			std::unordered_map<std::string, GLenum> shaders;
 			// shader constructor - for now using only vertex and fragment shaders
 			shader(const char* vertexPath, const char* fragmentPath, const char* geometryPath = nullptr);
 			// use the compiled shader program recognized by ID
@@ -197,6 +198,8 @@ namespace MLE {
 			template<typename... Args>
 			void setUniformValue(const std::string& name, Args&... values);
 		private:
+			void setShaderList();
+			void compileShader(unsigned int& shader, const char* shaderCode, std::string type);
 			void checkCompileErrors(GLuint shader, std::string type);
 		};
 

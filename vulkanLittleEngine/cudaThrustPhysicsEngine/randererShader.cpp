@@ -11,7 +11,21 @@
 
 namespace MLE::RENDERER {
 
+    void shader::setShaderList() {
+        shaders = {
+            {"VERTEX", GL_VERTEX_SHADER}, {"FRAGMENT", GL_FRAGMENT_SHADER},
+            {"GEOMETRY", GL_GEOMETRY_SHADER}, {"COMPUTE", GL_COMPUTE_SHADER} };
+    }
+
+    void shader::compileShader(unsigned int& shader, const char* shaderCode, std::string type) {
+        shader = glCreateShader(shaders[type]);
+        glShaderSource(shader, 1, &shaderCode, NULL);
+        glCompileShader(shader);
+        checkCompileErrors(shader, type);
+    }
+
     shader::shader(const char* vertexPath, const char* fragmentPath, const char* geometryPath = nullptr) {
+        setShaderList();
         // the code itself read from the shaders
         std::string vertexCode;
         std::string fragmentCode;
@@ -61,23 +75,14 @@ namespace MLE::RENDERER {
         // compile shaders 
         unsigned int vertex, fragment, geometry;
         // vertex shader
-        vertex = glCreateShader(GL_VERTEX_SHADER);
-        glShaderSource(vertex, 1, &vShaderCode, NULL);
-        glCompileShader(vertex);
-        //checkCompileErrors(vertex, "VERTEX");
+        compileShader(vertex, vShaderCode, "VERTEX");
         // fragment shader
-        fragment = glCreateShader(GL_FRAGMENT_SHADER);
-        glShaderSource(fragment, 1, &fShaderCode, NULL);
-        glCompileShader(fragment);
-        //checkCompileErrors(fragment, "FRAGMENT");
+        compileShader(fragment, fShaderCode, "FRAGMENT");
         // geometry shader
         if (geometryPath != nullptr)
         {
             const char* gShaderCode = geometryCode.c_str();
-            geometry = glCreateShader(GL_GEOMETRY_SHADER);
-            glShaderSource(geometry, 1, &gShaderCode, NULL);
-            glCompileShader(geometry);
-            //checkCompileErrors(geometry, "GEOMETRY");
+            compileShader(geometry, gShaderCode, "GEOMETRY");
         }
 
         // run shaders and delete after execution
@@ -89,7 +94,7 @@ namespace MLE::RENDERER {
         if (geometryPath != nullptr) { glAttachShader(ID, geometry); }
         // link the program
         glLinkProgram(ID);
-        //checkCompileErrors(ID, "PROGRAM");
+        checkCompileErrors(ID, "PROGRAM");
         // delete the shaders as they're linked into our program now and no longer necessery
         glDeleteShader(vertex);
         glDeleteShader(fragment);
@@ -126,6 +131,26 @@ namespace MLE::RENDERER {
             else if (typeid(*x) == typeid(glm::mat3))glUniform3fv(glGetUniformLocation(ID, name.c_str()), 1, &(*x)[0][0]);
             else if (typeid(*x) == typeid(glm::mat4))glUniform4fv(glGetUniformLocation(ID, name.c_str()), 1, &(*x)[0][0]);
             else { std::cout << "type not supported by openGL or GLSL" << std::endl; }
+        }
+    }
+
+    void shader::checkCompileErrors(GLuint shader, std::string type) {
+        GLint success;
+        GLchar infoLog[1024];
+
+        if (type == "PROGRAM") {
+            glGetProgramiv(shader, GL_LINK_STATUS, &success);
+            if(!success){
+                glGetProgramInfoLog(shader, 1024, NULL, infoLog);
+                std::cout << "ERROR::PROGRAM_LINKING_ERROR of type: " << type << "\n" << infoLog << "\n" << std::endl;
+            }
+        }
+        else {
+            glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+            if (!success) {
+                glGetShaderInfoLog(shader, 1024, NULL, infoLog);
+                std::cout << "ERROR::SHADER_COMPILATION_ERROR of type: " << type << "\n" << infoLog << "\n" << std::endl;
+            }
         }
     }
 

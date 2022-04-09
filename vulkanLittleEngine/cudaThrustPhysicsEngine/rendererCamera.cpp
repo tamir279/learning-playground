@@ -74,7 +74,7 @@ namespace MLE::RENDERER {
 		processMouseScrolling(static_cast<float>(Yoffset));
 	}
 
-	void RotateVector(glm::vec3& v, quaternion rotation) {
+	void camera::RotateVector(glm::vec3& v, quaternion rotation) {
 		quaternion vQuaternion(0, v);
 		rotation.ConvertToRotationQuaternionRepresentation();
 		// rotate the vector
