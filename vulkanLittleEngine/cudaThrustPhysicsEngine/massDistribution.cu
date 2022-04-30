@@ -37,7 +37,6 @@ namespace MLE::MLPE {
 			thrust::device_vector<T> device_vec = copy_vec(p);
 			thrust::device_vector<T>::iterator it;
 			it = thrust::find_if(
-				thrust::device,
 				device_vec.begin(),
 				device_vec.end(),
 				greater_than_one());
@@ -47,23 +46,23 @@ namespace MLE::MLPE {
 
 		// needed to build a mass element - mass per particle + particle - from RigidBodyInfo - can be further optimized!
 		void MLPE_RBP_massDistribution::distributeMassElements(mlpe_rbp_RigidBodyDynamicsInfo RigidBodyInfo) {
-			checkVector(massDistrib.prob);
 			// define transformed vectors
 			thrust::device_vector<float> prob;
 			std::vector<massElement> distribVec;
 			// needed to transform massDistrib<float> to massDistrib2<massElement>
-			thrust::transform(
-				thrust::device,
-				thrust::device_pointer_cast(massDistrib.prob.data()),
-				thrust::device_pointer_cast(massDistrib.prob.data()) + massDistrib.prob.size(),
+			thrust_wrapper_transform(
+				true,
+				massDistrib.prob.begin(),
+				massDistrib.prob.end(),
 				prob.begin(),
 				multiplyByConstant<float>(RigidBodyInfo.mass));
-			//                                massDistrib prob vector (mass of a particle)             particle info
-			thrust::transform(
-				thrust::device,
+			
+			thrust_wrapper_transform(
+				true,
 				prob.begin(),
 				prob.end(),
-				thrust::device_pointer_cast(RigidBodyInfo.particleDecomposition.particleDecomposition.data()),
+				RigidBodyInfo.particleDecomposition.particleDecomposition.begin(),
+				RigidBodyInfo.particleDecomposition.particleDecomposition.end(),
 				distribVec.begin(),
 				mElementComb());
 			massDistribution.massElements = distribVec;
@@ -75,12 +74,13 @@ namespace MLE::MLPE {
 
 
 		void MLPE_RBP_massDistribution::getCenterMass(mlpe_rbp_RigidBodyDynamicsInfo& RigidBodyInfo) {
-			glm::vec3 sum_vec = thrust::reduce(
-				thrust::device,
-				thrust::device_pointer_cast(massDistribution.massElements.data()),
-				thrust::device_pointer_cast(massDistribution.massElements.data()) + massDistribution.massElements.size(),
+			glm::vec3 sum_vec = thrust_wrapper_reduce(
+				true,
+				massDistribution.massElements.begin(),
+				massDistribution.massElements.end(),
 				glm::vec3(0),
 				thrust_add_Positions<massElement>());
+				
 			sum_vec *= 1 / RigidBodyInfo.mass;
 			massDistribution.centerMass = sum_vec;
 		}
