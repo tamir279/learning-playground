@@ -1,15 +1,5 @@
 #include "physicsDemoEngine.cuh"
 
-#define checkCudaErrors(call)                                 \
-  do {                                                        \
-    cudaError_t err = call;                                   \
-    if (err != cudaSuccess) {                                 \
-      printf("CUDA error at %s %d: %s\n", __FILE__, __LINE__, \
-             cudaGetErrorString(err));                        \
-      exit(EXIT_FAILURE);                                     \
-    }                                                         \
-  } while (0)
-
 // three memory maps
 enum class memLocation { HOST, HOST_PINNED, DEVICE};
 
@@ -31,7 +21,7 @@ namespace matrix_h {
 			this->memState = memLoc;
 
 			// allocate memory
-			if (memState = memLocation::HOST || memState = memLocation::HOST_PINNED) {
+			if (memState == memLocation::HOST || memState == memLocation::HOST_PINNED) {
 				allocateOnHost(m, M, N, memState);
 			}
 			else {
@@ -40,26 +30,26 @@ namespace matrix_h {
 		}
 
 		~mat() {
-			(memState = memLocation::HOST || memState = memLocation::HOST_PINNED)
+			(memState == memLocation::HOST || memState == memLocation::HOST_PINNED)
 				? destroyHostMatrix(m, memState) : destroyDeviceMatrix(m);
 		}
 
 		// operators
-		void operator+=(const mat& B) {
+		void operator+=(const mat<T>& B) {
 			// allocate result matrix on device for cublas computation
-			mat C(M, N, memLocation::DEVICE);
+			mat<T> C(M, N, memLocation::DEVICE);
 
 			matAdd(CUBLAS_OP_N, CUBLAS_OP_N, M, N, this->m, M, this->memState, B.m, M, B.memState, C.m, M, C.memState);
 
 			// copy back to this matrix
-			(memState = memLocation::HOST || memState = memLocation::HOST_PINNED)
+			(memState == memLocation::HOST || memState == memLocation::HOST_PINNED)
 				? copyDeviceToHost(C.m, this->m, M, N) : copyDeviceToDevice(C.m, this->m, M, N);
 		}
 
 		// the + operator returns a device allocated matrix
-		mat operator+(const mat& B) {
+		mat<T> operator+(const mat<T>& B) {
 			// allocate result matrix on device for cublas computation
-			mat C(M, N, memLocation::DEVICE);
+			mat<T> C(M, N, memLocation::DEVICE);
 
 			matAdd(CUBLAS_OP_N, CUBLAS_OP_N, M, N, this->m, M, this->memState, B.m, M, B.memState, C.m, M, C.memState);
 
@@ -67,28 +57,64 @@ namespace matrix_h {
 			return C;
 		}
 
-		void operator*=(const mat& B) {
+		void operator*=(const mat<T>& B) {
 			// allocate result matrix on device for cublas computation
-			mat C(M, B.N, memLocation::DEVICE);
+			mat<T> C(M, B.N, memLocation::DEVICE);
 
 			// C(M,N) = A(M,N)B(N,B.N)
-			matMul(CUBLAS_OP_N, CUBLAS_OP_N, M, B.N, N, this->m, M, B.m, N, C.m, M);
+			matMul(CUBLAS_OP_N, CUBLAS_OP_N, M, B.N, N, this->m, M, this->memState, B.m, N, B.memState, C.m, M , C.memState);
 
 			// copy back to this matrix
-			(memState = memLocation::HOST || memState = memLocation::HOST_PINNED)
+			(memState == memLocation::HOST || memState == memLocation::HOST_PINNED)
 				? copyDeviceToHost(C.m, this->m, M, N) : copyDeviceToDevice(C.m, this->m, M, N);
 		}
 
 		// the * operator returns a device allocated matrix
-		mat operator*(const mat& B) {
+		mat<T> operator*(const mat<T>& B) {
 			// allocate result matrix on device for cublas computation
-			mat C(M, N, memLocation::DEVICE);
+			mat<T> C(M, N, memLocation::DEVICE);
 
 			// C(M,N) = A(M,N)B(N,B.N)
-			matMul(CUBLAS_OP_N, CUBLAS_OP_N, M, B.N, N, this->m, M, B.m, N, C.m, M);
+			matMul(CUBLAS_OP_N, CUBLAS_OP_N, M, B.N, N, this->m, M, this->memState, B.m, N, B.memState, C.m, M, C.memState);
 
 			// return the new matrix
 			return C;
+		}
+
+		// copy host to device - from B to matrix m
+		void operator<<=(const mat<T>& B) {
+			copyHostToDevice(B.m, m, M, N);
+		}
+
+		// copy device to host - from B to matrix m
+		void operator>>=(const mat<T>& B) {
+			copyDeviceToHost(B.m, m, M, N);
+		}
+
+		// copy host to host - from B to matrix m
+		void operator<=(const mat<T>& B) {
+			copyHostToHost(B.m, m, M, N);
+		}
+
+		// copy device to device - from B to matrix m
+		void operator>=(const mat<T>& B) {
+			copyDeviceToDevice(B.m, m, M, N);
+		}
+
+		// dynamic copying
+		void operator=(const mat<T>& B) {
+			if ((memState == memLocation::HOST_PINNED || memState == memLocation::HOST) &&
+				(B.memState == memLocation::HOST_PINNED || B.memState == memLocation::HOST))
+				copyHostToHost(B.m, m, M, N);
+			else if ((memState == memLocation::HOST_PINNED || memState == memLocation::HOST) &&
+				B.memState == memLocation::DEVICE)
+				copyDeviceToHost(B.m, m, M, N);
+			else if (memState == memLocation::DEVICE &&
+				(B.memState == memLocation::HOST_PINNED || B.memState == memLocation::HOST))
+				copyHostToDevice(B.m, m, M, N);
+			else if (memState == memLocation::DEVICE && B.memState == memLocation::DEVICE)
+				copyDeviceToDevice(B.m, m, M, N);
+			else printf_s("invalid memory location format ! \n");
 		}
 
 	private:
@@ -197,16 +223,48 @@ namespace matrix_h {
 									   const T* B, int ldb,
 									   T* C, int ldc) {
 		if (typeid(T) == typeid(float)) {
-			return cublasSgeam(handle, transa, transb, m, n, alpha, A, lda, beta, B, ldb, C, ldc);
+			return cublasSgeam(handle,
+							   transa,
+							   transb,
+							   m, n,
+							   (const float*)alpha,
+							   (const float*)A, lda,
+							   (const float*)beta,
+							   (const float*)B, ldb,
+							   (float*)C, ldc);
 		}
 		else if (typeid(T) == typeid(double)) {
-			return cublasDgeam(handle, transa, transb, m, n, alpha, A, lda, beta, B, ldb, C, ldc);
+			return cublasDgeam(handle,
+							   transa,
+							   transb,
+							   m, n,
+							   (const double*)alpha,
+							   (const double*)A, lda,
+							   (const double*)beta,
+							   (const double*)B, ldb,
+							   (double*)C, ldc);
 		}
 		else if (typeid(T) == typeid(cuComplex)) {
-			return cublasCgeam(handle, transa, transb, m, n, alpha, A, lda, beta, B, ldb, C, ldc);
+			return cublasCgeam(handle,
+							   transa,
+							   transb,
+							   m, n,
+							   (const cuComplex*)alpha,
+							   (const cuComplex*)A, lda,
+							   (const cuComplex*)beta,
+							   (const cuComplex*)B, ldb,
+							   (cuComplex*)C, ldc);
 		}
 		else if (typeid(T) == typeid(cuDoubleComplex)) {
-			return cublasZgeam(handle, transa, transb, m, n, alpha, A, lda, beta, B, ldb, C, ldc);
+			return cublasZgeam(handle,
+							   transa,
+							   transb,
+							   m, n,
+							   (const cuDoubleComplex*)alpha,
+							   (const cuDoubleComplex*)A, lda,
+							   (const cuDoubleComplex*)beta,
+							   (const cuDoubleComplex*)B, ldb,
+							   (cuDoubleComplex*)C, ldc);
 		}
 		else {
 			printf("type T is not supported for current matrix operation \n");
@@ -234,8 +292,8 @@ namespace matrix_h {
 
 		// copy host data to device if needed
 		T* d_A; T* d_B; bool A_status; bool B_status;
-		A_status = checkToAllocateOnDevice(A, d_A, lda, n, Aloc);
-		B_status = checkToAllocateOnDevice(B, d_B, ldb, n, Bloc);
+		A_status = checkToAllocateOnDevice(const_cast<T*>(A), d_A, lda, n, Aloc);
+		B_status = checkToAllocateOnDevice(const_cast<T*>(B), d_B, ldb, n, Bloc);
 
 		// create handle
 		checkCuBLAS_status(cublasCreate_v2(&handle));
@@ -264,4 +322,124 @@ namespace matrix_h {
 
 	}
 
+	// matrix multiplication wrapper to deal with all data types
+	template<typename T>
+	cublasStatus_t cublasGemm_wrapper(cublasHandle_t handle,
+									  cublasOperation_t transa,
+								      cublasOperation_t transb,
+									  int m, int n, int k,
+									  const T* alpha,
+									  const T* A, int lda,
+									  const T* beta,
+									  const T* B, int ldb,
+									  T* C, int ldc) {
+		if (typeid(T) == typeid(float)) {
+			return cublasSgemm_v2(handle,
+								  transa,
+								  transb,
+								  m, n, k,
+								  (const float*)alpha,
+								  (const float*)A, lda,
+								  (const float*)B, ldb,
+								  (const float*)beta,
+								  (float*)C, ldc);
+		}
+		else if (typeid(T) == typeid(double)) {
+			return cublasDgemm_v2(handle,
+								  transa,
+								  transb,
+								  m, n, k,
+								  (const double*)alpha,
+								  (const double*)A, lda,
+								  (const double*)B, ldb,
+								  (const double*)beta,
+								  (double*)C, ldc);
+		}
+		else if (typeid(T) == typeid(cuComplex)) {
+			return cublasCgemm_v2(handle,
+								  transa,
+								  transb,
+								  m, n, k,
+								  (const cuComplex*)alpha,
+								  (const cuComplex*)A, lda,
+								  (const cuComplex*)B, ldb,
+								  (const cuComplex*)beta,
+								  (cuComplex*)C, ldc);
+		}
+		else if (typeid(T) == typeid(cuDoubleComplex)) {
+			return cublasZgemm_v2(handle,
+								  transa,
+								  transb,
+								  m, n, k,
+								  (const cuDoubleComplex*)alpha,
+								  (const cuDoubleComplex*)A, lda,
+								  (const cuDoubleComplex*)B, ldb,
+								  (const cuDoubleComplex*)beta,
+								  (cuDoubleComplex*)C, ldc);
+		}
+		else {
+			printf("type T is not supported for current matrix operation \n");
+			return CUBLAS_STATUS_NOT_SUPPORTED;
+		}
+	}
+
+	// C is defined to be allocated on device in matrix operators - no need for
+	// memory Location checks
+	template<typename T>
+	void mat<T>::matMul(cublasOperation_t transa,
+						cublasOperation_t transb,
+						int m, int n, int k,
+						const T* A, int lda,
+						memLocation Aloc,
+						const T* B, int ldb,
+						memLocation Bloc,
+						T* C, int ldc,
+						memLocation Cloc) {
+
+		const T alpha = static_cast<T>(1);
+		const T beta = static_cast<T>(0);
+		cublasHandle_t handle;
+
+
+		// copy host data to device if needed
+		T* d_A; T* d_B; bool A_status; bool B_status;
+		A_status = checkToAllocateOnDevice(const_cast<T*>(A), d_A, lda, n, Aloc);
+		B_status = checkToAllocateOnDevice(const_cast<T*>(B), d_B, ldb, n, Bloc);
+
+		// create handle
+		checkCuBLAS_status(cublasCreate_v2(&handle));
+		// compute
+		if (A_status && B_status) {
+			checkCuBLAS_status(cublasGemm_wrapper<T>(handle, transa, transb, m, n, k, &alpha, d_A, lda, &beta, d_B, ldb, C, ldc));
+			cudaFree(d_A); cudaFree(d_B);
+		}
+		else if (A_status) {
+			checkCuBLAS_status(cublasGemm_wrapper<T>(handle, transa, transb, m, n, k, &alpha, d_A, lda, &beta, B, ldb, C, ldc));
+			cudaFree(d_A);
+		}
+		else if (B_status) {
+			checkCuBLAS_status(cublasGemm_wrapper<T>(handle, transa, transb, m, n, k, &alpha, A, lda, &beta, d_B, ldb, C, ldc));
+			cudaFree(d_B);
+		}
+		else {
+			checkCuBLAS_status(cublasGemm_wrapper<T>(handle, transa, transb, m, n, k, &alpha, A, lda, &beta, B, ldb, C, ldc));
+		}
+
+		checkCudaErrors(cudaDeviceSynchronize());
+
+		// destroy handle
+		checkCuBLAS_status(cublasDestroy_v2(handle));
+
+	}
+
+	template<typename T>
+	void mat<T>::destroyHostMatrix(T* m, memLocation memLoc) {
+		if (memLoc == memLocation::HOST_PINNED) checkCudaErrors(cudaFreeHost(m));
+		else free(m);
+	}
+
+	template<typename T>
+	void mat<T>::destroyDeviceMatrix(T* m) {
+		checkCudaErrors(cudaFree(m));
+	}
 }
