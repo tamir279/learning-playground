@@ -29,6 +29,10 @@ __global__ void printMeDev(float* P, int uWP, int uHP) {
 
 #define checkCuBLAS_status(ans) { cublasAssert((ans), __FILE__, __LINE__); }
 
+#define HOST_ALLOC(memLoc)((memLoc) == memLocation::HOST_PINNED || (memLoc) == memLocation::HOST)
+#define DEVICE_ALLOC(memLoc)((memLoc) == memLocation::DEVICE)
+
+
 // general error definition
 
 inline void cublasAssert(cublasStatus_t code, const char* file, int line, bool abort = true)
@@ -85,7 +89,7 @@ template<typename T>
 class mat {
 public:
 	// thee matrix data
-	T* m;
+	T* data;
 	// dimensions
 	int M; int N; memLocation memState;
 
@@ -96,63 +100,74 @@ public:
 		this->memState = memLoc;
 
 		// allocate memory
-		if (memState == memLocation::HOST || memState == memLocation::HOST_PINNED) {
-			allocateOnHost(&m, M, N, memState);
+		if (HOST_ALLOC(memState)) {
+			allocateOnHost(&data, M, N, memState);
 		}
 		else {
-			allocateOnDevice(&m, M, N);
+			allocateOnDevice(&data, M, N);
 		}
+	}
+
+	// 
+	mat(const mat<T>& obj) {
+		// copy parameters
+		this->M = obj.M;
+		this->N = obj.N;
+		this->memState = obj.memState;
+
+		// allocate memory
+		(HOST_ALLOC(memState)) ? allocateOnHost(&data, M, N, memState) : allocateOnDevice(&data, M, N);
+
+		// copy data
+		dynamicCopy(data, obj.data, M, N, memState, obj.memState);
 	}
 
 	~mat() {
-		(memState == memLocation::HOST || memState == memLocation::HOST_PINNED)
-			? destroyHostMatrix(&m, memState) : destroyDeviceMatrix(&m);
+		(HOST_ALLOC(memState))
+			? destroyHostMatrix(&data, memState) : destroyDeviceMatrix(&data);
 	}
 
-	// copy constructor
-	//mat(const mat<T>& B) {
-	//}
-
 	// operators
-	void operator+=(const mat<T> B) {
+	mat<T>& operator+=(const mat<T>& B) {
 		// allocate result matrix on device for cublas computation
 		mat<T> C(M, N, memLocation::DEVICE);
 
 		matAdd(CUBLAS_OP_N,
 			   CUBLAS_OP_N,
 			   M, N,
-			   (const T**)&m, M,
+			   (const T**)&data, M,
 			   memState,
-			   (const T**)&(B.m), M,
+			   (const T**)&(B.data), M,
 		       B.memState,
-			   &(C.m), M,
+			   &(C.data), M,
 			   C.memState);
 
 		// copy back to this matrix
-		(memState == memLocation::HOST || memState == memLocation::HOST_PINNED)
-			? copyDeviceToHost(C.m, m, M, N) : copyDeviceToDevice(C.m, m, M, N);
+		(HOST_ALLOC(memState))
+			? copyDeviceToHost(C.data, data, M, N) : copyDeviceToDevice(C.data, data, M, N);
+		return *this;
 	}
 
 	// the + operator returns a device allocated matrix
-	mat<T> operator+(const mat<T> B) {
+	mat<T> operator+(const mat<T>& B) {
 		// allocate result matrix on device for cublas computation
 		mat<T> C(M, N, memLocation::DEVICE);
 
 		matAdd(CUBLAS_OP_N,
 			   CUBLAS_OP_N,
 			   M, N,
-			   (const T**)&m, M,
+			   (const T**)&data, M,
 			   memState,
-			   (const T**)&(B.m), M,
+			   (const T**)&(B.data), M,
 			   B.memState,
-			   &(C.m), M,
+			   &(C.data), M,
 			   C.memState);
 
 		// return the new matrix
 		return C;
 	}
 
-	void operator*=(const mat<T> B) {
+	mat<T>& operator*=(const mat<T>& B) {
 		// allocate result matrix on device for cublas computation
 		mat<T> C(M, B.N, memLocation::DEVICE);
 
@@ -163,25 +178,27 @@ public:
 		matMul(CUBLAS_OP_N,
 			   CUBLAS_OP_N,
 			   M, B.N, N,
-			   (const T**)&m, mT,
+			   (const T**)&data, mT,
 			   memState,
 			   M,
-			   (const T**)&(B.m), mT,
+			   (const T**)&(B.data), mT,
 			   B.memState,
 			   N,
-			   &(C.m), mT,
+			   &(C.data), mT,
 			   M, mT,
 			   CUBLAS_GEMM_DEFAULT);
 
 		// copy back to this matrix
-		(memState == memLocation::HOST || memState == memLocation::HOST_PINNED)
-			? copyDeviceToHost(C.m, m, M, N) : copyDeviceToDevice(C.m, m, M, N);
+		(HOST_ALLOC(memState))
+			? copyDeviceToHost(C.data, data, M, N) : copyDeviceToDevice(C.data, data, M, N);
+		return *this;
 	}
 
 	// the * operator returns a device allocated matrix
 	mat<T> operator*(const mat<T>& B) {
 		// allocate result matrix on device for cublas computation
 		mat<T> C(M, B.N, memLocation::DEVICE);
+
 		//get the cuda types
 		cudaDataType mT = m_T();
 
@@ -189,55 +206,57 @@ public:
 		matMul(CUBLAS_OP_N,
 			   CUBLAS_OP_N,
 			   M, B.N, N,
-			   (const T**)&m, mT,
+			   (const T**)&data, mT,
 			   memState,
 			   M,
-			   (const T**)&(B.m), mT,
+			   (const T**)&(B.data), mT,
 			   B.memState,
 			   N,
-			   &(C.m), mT,
+			   &(C.data), mT,
 			   M, mT,
 			   CUBLAS_GEMM_DEFAULT);
-		printf("\ncopy multiplication matrix result:\n");
-		printMeDev <<<1, 1>>> (C.m, M, B.N);
+
+		checkCudaErrors(cudaDeviceSynchronize());
 		// return the new matrix
 		return C;
 	}
 
 	// copy host to device - from B to matrix m
-	void operator<<=(const mat<T> B) {
-		copyHostToDevice(B.m, m, M, N);
+	mat<T>& operator<<=(const mat<T>& B) {
+		copyHostToDevice(B.data, data, M, N);
+		return *this;
 	}
 
 	// copy device to host - from B to matrix m
-	void operator>>=(const mat<T> B) {
-		copyDeviceToHost(B.m, m, M, N);
+	mat<T>& operator>>=(const mat<T>& B) {
+		copyDeviceToHost(B.data, data, M, N);;
+		return *this;
 	}
 
 	// copy host to host - from B to matrix m
-	void operator<=(const mat<T> B) {
-		copyHostToHost(B.m, m, M, N);
+	mat<T>& operator<=(const mat<T>& B) {
+		copyHostToHost(B.data, data, M, N);
+		return *this;
 	}
 
 	// copy device to device - from B to matrix m
-	void operator>=(const mat<T> B) {
-		copyDeviceToDevice(B.m, m, M, N);
+	mat<T>& operator>=(const mat<T>& B) {
+		copyDeviceToDevice(B.data, data, M, N);
+		return *this;
 	}
 
 	// dynamic copying
-	void operator=(const mat<T>& B) {
-		if ((memState == memLocation::HOST_PINNED || memState == memLocation::HOST) &&
-			(B.memState == memLocation::HOST_PINNED || B.memState == memLocation::HOST))
-			copyHostToHost(B.m, m, M, N);
-		else if ((memState == memLocation::HOST_PINNED || memState == memLocation::HOST) &&
-			B.memState == memLocation::DEVICE)
-			copyDeviceToHost(B.m, m, M, N);
-		else if (memState == memLocation::DEVICE &&
-			(B.memState == memLocation::HOST_PINNED || B.memState == memLocation::HOST))
-			copyHostToDevice(B.m, m, M, N);
-		else if (memState == memLocation::DEVICE && B.memState == memLocation::DEVICE)
-			copyDeviceToDevice(B.m, m, M, N);
+	mat<T>& operator=(const mat<T>& B) {
+		if (HOST_ALLOC(memState) && HOST_ALLOC(B.memState))
+			*this <= B;
+		else if (HOST_ALLOC(memState) && DEVICE_ALLOC(B.memState))
+			*this >>= B;
+		else if (DEVICE_ALLOC(memState) && HOST_ALLOC(B.memState))
+			*this <<= B;
+		else if (DEVICE_ALLOC(memState) && DEVICE_ALLOC(B.memState))
+			*this >= B;
 		else printf_s("invalid memory location format ! \n");
+		return *this;
 	}
 
 private:
@@ -263,6 +282,11 @@ private:
 	void copyHostToHost(const T* h_m1, T* h_m2, int n_rows, int n_cols);
 	void copyDeviceToHost(const T* d_m, T* h_m, int n_rows, int n_cols);
 	void copyDeviceToDevice(const T* d_m1, T* d_m2, int n_rows, int n_cols);
+
+	// dynamic copy
+	void dynamicCopy(T* data1, T* data2, int n_rows, int n_cols, memLocation memLoc1, memLocation memLoc2);
+	// overload
+	//void dynamicCopy(mat<T> mat1, mat<T> mat2, int n_rows, int n_cols);
 
 	// check if transfer to device is needed
 	bool checkToAllocateOnDevice(const T* h_m, T** d_m, int n_rows, int n_cols, memLocation memLoc);
@@ -364,6 +388,7 @@ void mat<T>::copyDeviceToHost(T* d_m, T* h_m, int n_rows, int n_cols) {
 	cudaStream_t stream;
 	checkCudaErrors(cudaStreamCreate(&stream));
 	checkCudaErrors(cudaMemcpyAsync(h_m, d_m, n_rows * n_cols * sizeof(T), cudaMemcpyDeviceToHost, stream));
+	checkCudaErrors(cudaStreamSynchronize(stream));
 	checkCudaErrors(cudaStreamDestroy(stream));
 }
 
@@ -389,6 +414,19 @@ void mat<T>::copyDeviceToDevice(const T* d_m1, T* d_m2, int n_rows, int n_cols) 
 	checkCudaErrors(cudaStreamCreate(&stream));
 	checkCudaErrors(cudaMemcpyAsync(d_m2, d_m1, n_rows * n_cols * sizeof(T), cudaMemcpyDeviceToDevice, stream));
 	checkCudaErrors(cudaStreamDestroy(stream));
+}
+
+// copy from mat2 to mat1
+template<typename T>
+void mat<T>::dynamicCopy(T* data1, T* data2, int n_rows, int n_cols, memLocation memLoc1, memLocation memLoc2) {
+	if (HOST_ALLOC(memLoc1) && HOST_ALLOC(memLoc2))
+		copyHostToHost(data2, data1, n_rows, n_cols);
+	else if (HOST_ALLOC(memLoc1) && DEVICE_ALLOC(memLoc2))
+		copyDeviceToHost(data2, data1, n_rows, n_cols);
+	else if (DEVICE_ALLOC(memLoc1) && HOST_ALLOC(memLoc2))
+		copyHostToDevice(data2, data1, n_rows, n_cols);
+	else
+		copyDeviceToDevice(data2, data1, n_rows, n_cols);
 }
 
 template<typename T>
