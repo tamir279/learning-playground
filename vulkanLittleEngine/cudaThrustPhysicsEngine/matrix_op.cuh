@@ -1400,4 +1400,6 @@ Sparse_mat<T> Sparse_mat<T>::sparseSparseMatMul(cusparseSpMatDescr_t matB) {
 	// destroy handles
 	checkCuSparseErrors(cusparseSpGEMM_destroyDescr(spgemmDesc));
 	checkCuSparseErrors(cusparseDestroy(handle));
+
+	return C;
 }
