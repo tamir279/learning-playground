@@ -703,7 +703,7 @@ public:
 
 private:
 	/*
-	---------------- SPARSE - DENSE MULTIPLICATION USING cuSPARSELt ---------------- 
+	---------------- STRUCTURED SPARSE - DENSE MULTIPLICATION USING cuSPARSELt ---------------- 
 	*/
 
 	// calculate compute type for cusparse and cusparseLt
@@ -763,13 +763,13 @@ private:
 	void cusparseLtSparseMatPrune(const cusparseLtHandle_t* handle,
 								  const cusparseLtMatmulDescriptor_t* matmulDescr,
 								  const void* d_in,
-		                          void* d_out,
+		                          void** d_out,
 		                          cudaStream_t stream);
 
 	void cusparseLtSparseMatCompress(const cusparseLtHandle_t* handle,
 									 const cusparseLtMatmulPlan_t* plan,
 									 const void* d_dense,
-									 void* d_compressed,
+									 void** d_compressed,
 									 cudaStream_t stream);
 
 	// search for optimal execution kernel
@@ -795,11 +795,13 @@ private:
 						   memLocation Bloc,
 						   const T* C,
 						   memLocation Cloc,
-						   T* d_D,
+						   T** d_D,
 						   void* workspace,
 						   cudaStream_t* streams,
 						   int32_t numStreams);
 
+	// execute matrix multiplication - entire process
+	void sparseDenseMatMul_op();
 	/*
 	---------------- SPARSE - SPARSE MULTIPLICATION\ADDING USING cuSPARSE ----------------
 	*/
@@ -816,9 +818,9 @@ private:
 						 int64_t rows,
 						 int64_t cols,
 						 int64_t nnz,
-						 void* csrRowOffsets,
-						 void* csrColInd,
-						 void* csrValues);
+						 void** csrRowOffsets,
+						 void** csrColInd,
+						 void** csrValues);
 
 	// convert the dense format of a matrix to a sparse CSR format, allocate CSR arrays in device
 	// create a dense matrix and convert it to a sparse CSR representation
@@ -1074,15 +1076,15 @@ template<typename T>
 void Sparse_mat<T>::cusparseLtSparseMatPrune(const cusparseLtHandle_t* handle,
 											 const cusparseLtMatmulDescriptor_t* matmulDescr,
 											 const void* d_in,
-											 void* d_out,
+											 void** d_out,
 											 cudaStream_t stream) {
 
 	int* d_valid; int isValid;
 	// malloc result in memory
 	checkCudaErrors(cudaMalloc((void**)&d_valid, sizeof(d_valid)));
 
-	checkCuSparseErrors(cusparseLtSpMMAPrune(handle, matmulDescr, d_in, d_out, CUSPARSELT_PRUNE_SPMMA_TILE, stream));
-	checkCuSparseErrors(cusparseLtSpMMAPruneCheck(handle, matmulDescr, d_out, d_valid, stream));
+	checkCuSparseErrors(cusparseLtSpMMAPrune(handle, matmulDescr, d_in, *d_out, CUSPARSELT_PRUNE_SPMMA_TILE, stream));
+	checkCuSparseErrors(cusparseLtSpMMAPruneCheck(handle, matmulDescr, *d_out, d_valid, stream));
 
 	// copy to host integer
 	checkCudaErrors(cudaMemcpyAsync(&isValid, d_valid, cudaMemcpyDeviceToHost, stream));
@@ -1102,14 +1104,14 @@ template<typename T>
 void Sparse_mat<T>::cusparseLtSparseMatCompress(const cusparseLtHandle_t* handle,
 												const cusparseLtMatmulPlan_t* plan,
 												const void* d_dense,
-												void* d_compressed,
+												void** d_compressed,
 												cudaStream_t stream) {
 
 	size_t compressedSize;
 	checkCuSparseErrors(cusparseLtSpMMACompressedSize(handle, plan, &compressedSize));
 	// allocate compressedSize bytes for d_compressed
-	checkCudaErrors(cudaMalloc(&d_compressed, compressedSize)); // remember to free at the end of the program
-	checkCuSparseErrors(cusparseLtSpMMACompress(handle, plan, d_dense, d_compressed, stream));
+	checkCudaErrors(cudaMalloc(d_compressed, compressedSize)); // remember to free at the end of the program
+	checkCuSparseErrors(cusparseLtSpMMACompress(handle, plan, d_dense, *d_compressed, stream));
 }
 
 // search for fastest algorithm and automatically updates the plan to the optimal multiplication algorithm
@@ -1148,7 +1150,7 @@ void Sparse_mat<T>::sparseDenseMatMul(const cusparseLtHandle_t* handle,
 								      memLocation Bloc,
 								      const T* C,
 								      memLocation Cloc,
-								      T* d_D,
+								      T** d_D,
 								      void* workspace,
 								      cudaStream_t* streams,
 								      int32_t numStreams) {
@@ -1169,7 +1171,7 @@ void Sparse_mat<T>::sparseDenseMatMul(const cusparseLtHandle_t* handle,
 										 (B_status) ? d_B : B,
 										 &beta,
 										 (C_status) ? d_C : C,
-										 d_D,
+										 *d_D,
 										 workspace,
 										 streams,
 										 numStreams));
@@ -1178,6 +1180,41 @@ void Sparse_mat<T>::sparseDenseMatMul(const cusparseLtHandle_t* handle,
 	if (A_status)checkCudaErrors(cudaFree(d_A));
 	if (B_status)checkCudaErrors(cudaFree(d_B));
 	if (C_status)checkCudaErrors(cudaFree(d_C));
+}
+
+// sparse - dense multiplication
+template<typename T>
+void Sparse_mat<T>::sparseDenseMatMul_op() {
+
+	// init value type
+	auto valueType = cusparseM_T();
+	// create handle and descriptors
+	cusparseLtHandle_t handle; cusparseLtMatDescriptor_t matA;
+	cusparseLtMatDescriptor_t matB; cusparseLtMatDescriptor_t matC;
+	cusparseLtMatDescriptor_t matD;
+	cusparseLtMatmulDescriptor_t matmulDescr;
+	cusparseLtMatmulAlgSelection_t AlgSel;
+	cusparseLtMatmulPlan_t plan;
+	checkCuSparseErrors(cusparseLtInit(&handle));
+	// init A
+	cusparseLtStructuredMatInit(&handle, &matA, M, N, M, 16, valueType, CUSPARSELT_SPARSITY_50_PERCENT);
+	// init B, C
+	cusparseLtDenseMatInit(&handle, &matB, M, N, M, 16, valueType);
+	cusparseLtDenseMatInit(&handle, &matC, M, N, M, 16, valueType);
+
+	// initialize matmul descriptor
+	cusparseLtMatMulInit(&handle,
+						 &matmulDescr,
+						 CUSPARSE_OPERATION_NON_TRANSPOSE,
+						 CUSPARSE_OPERATION_NON_TRANSPOSE,
+						 &matA, &matB, &matC, &matD);
+	// initialize algorithm selection
+	cusparseLtAlgSelectInit(&handle, &AlgSel, &matmulDescr, CUSPARSELT_MATMUL_ALG_DEFAULT);
+	// initialize plan
+	cusparseLtPlanInit(&handle, &plan, &matmulDescr, &AlgSel);
+
+	// prune and compress
+	cusparseLtSparseMatPrune(&handle, &matmulDescr, )
 }
 
 /*
@@ -1221,17 +1258,17 @@ void Sparse_mat<T>::createCsrSparse(cusparseSpMatDescr_t* spMatDescr,
 								    int64_t rows,
 								    int64_t cols,
 								    int64_t nnz,
-								    void* csrRowOffsets,
-								    void* csrColInd,
-								    void* csrValues) {
+								    void** csrRowOffsets,
+								    void** csrColInd,
+								    void** csrValues) {
 
 	cudaDataType valueType = cusparseM_T();
 	checkCuSparseErrors(cusparseCreateCsr(spMatDescr,
 										  rows, cols,
 										  nnz,
-										  csrRowOffsets,
-										  csrColInd,
-										  csrValues,
+										  *csrRowOffsets,
+										  *csrColInd,
+										  *csrValues,
 										  CUSPARSE_INDEX_32I,
 										  CUSPARSE_INDEX_32I,
 										  CUSPARSE_INDEX_BASE_ZERO,
@@ -1266,13 +1303,11 @@ void Sparse_mat<T>::convertDenseToCsrFormat(cusparseHandle_t handle,
 										    T** d_csrValues,
 										    int64_t** d_csrRowOffsets) {
 	
-	// check if const T* values is in device - if not, allocate memory in device and copy
-	T* d_V; cusparseDenseToSparseAlg_t alg = CUSPARSE_DENSETOSPARSE_ALG_DEFAULT;
-	auto d_status = checkToAllocateOnDevice(values, &d_V, rows, cols, memLocation memLoc);
+    cusparseDenseToSparseAlg_t alg = CUSPARSE_DENSETOSPARSE_ALG_DEFAULT;
 	// malloc the rows offset in device
 	checkCudaErrors(cudaMalloc((void**)d_csrRowOffsets, (rows + 1) * sizeof(int64_t))); // REMEMBER TO FREE
 
-	// build a dense matrix from the current matrix
+	// build a dense matrix from the current matrix - if the matrix is on the host, allocate memory on device
 	cusparseDnMatDescr_t matA;
 	createDenseFormat(&matA, rows, cols, ld, const_cast<T*>(values));
 
@@ -1343,7 +1378,7 @@ void Sparse_mat<T>::getWorkEstimation_allocBuffers(cusparseHandle_t handle,
 		                                              CUSPARSE_SPGEMM_DEFAULT,
 													  spgemmDescr,
 													  bufferSize1,
-													  externalBuffer1));
+													  *externalBuffer1));
 }
 
 // compute the actual result and allocate second buffer for copy and computation
@@ -1388,7 +1423,7 @@ void Sparse_mat<T>::computeSpGEMM_allocBuffers(cusparseHandle_t handle,
 											   CUSPARSE_SPGEMM_DEFAULT,
 											   spgemmDescr,
 											   bufferSize2,
-											   externalBuffer2));
+											   *externalBuffer2));
 }
 
 // copy the results to a seperate matrix - from descriptor
