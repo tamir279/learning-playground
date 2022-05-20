@@ -689,7 +689,7 @@ public:
 	void createCSR();
 	void destroyCSR();
 
-	// sparse on sparse
+	// matrix - vector product adding
 	Sparse_mat<T> operator+();
 	Sparse_mat<T>& operator+=();
 	// sparse on dense
@@ -759,6 +759,17 @@ private:
 							const cusparseLtMatmulDescriptor_t* matmulDescr,
 							const cusparseLtMatmulAlgSelection_t* algSelection);
 
+	// unite all initializers in one main function
+	void cusparseLtInitDescriptors(const cusparseLtHandle_t** handle,
+								   cusparseLtMatDescriptor_t matDescrs[],
+								   int64_t a_rows, int64_t a_cols,
+								   int64_t b_rows, int64_t b_cols,
+								   int64_t c_rows, int64_t c_cols,
+								   cudaDataType valueType,
+								   cusparseLtMatmulDescriptor_t** matmulDescr,
+								   cusparseLtMatmulAlgSelection_t** algSelection,
+								   cusparseLtMatmulPlan_t** plan);
+
 	// prune and compress structured (sparse) matrices
 	void cusparseLtSparseMatPrune(const cusparseLtHandle_t* handle,
 								  const cusparseLtMatmulDescriptor_t* matmulDescr,
@@ -772,6 +783,16 @@ private:
 									 void** d_compressed,
 									 cudaStream_t stream);
 
+	// prune and compress structured matrix
+	void cusparseLtSparseMatPrune_Compress(const cusparseLtHandle_t* handle,
+										   const cusparseLtMatmulDescriptor_t* matmulDescr,
+										   const cusparseLtMatmulPlan_t* plan,
+										   const T* denseMat,
+										   int sizeA,
+										   memLocation Loc,
+										   void** d_compressed,
+										   cudaStream_t stream);
+
 	// search for optimal execution kernel
 	void cusparseLtSearchOptimalKernel(const cusparseLtHandle_t* handle,
 									   cusparseLtMatmulPlan_t* plan,
@@ -780,13 +801,13 @@ private:
 									   const void* d_B,
 									   const void* beta,
 									   const void* d_C,
-									   void* d_D,
+									   void** d_D,
 									   void* workspace,
 									   cudaStream_t* streams,
 									   int32_t numStreams);
 
 	// execute operation
-	void sparseDenseMatMul(const cusparseLtHandle_t* handle,
+	void structuredDenseMatMul(const cusparseLtHandle_t* handle,
 						   const cusparseLtMatmulPlan_t* plan,
 						   int sizeA, int sizeB, int sizeC,
 						   const T* A,
@@ -801,9 +822,15 @@ private:
 						   int32_t numStreams);
 
 	// execute matrix multiplication - entire process
-	void sparseDenseMatMul_op();
+	void structuredDenseMatMul_op(int64_t b_rows, int64_t b_cols,
+								  const T* B,
+								  memLocation Bloc,
+								  int64_t c_rows, int64_t c_cols,
+								  const T* C,
+								  memLocation Cloc,
+								  T** D);
 	/*
-	---------------- SPARSE - SPARSE MULTIPLICATION\ADDING USING cuSPARSE ----------------
+	---------------- SPARSE - SPARSE MULTIPLICATION USING cuSPARSE ----------------
 	*/
 
 	// create a dense representation
@@ -859,6 +886,20 @@ private:
 									size_t* bufferSize2,
 									void** externalBuffer2);
 
+	// get workspace and compute
+	void spGEMM(cusparseHandle_t handle,
+				const void* alpha,
+				cusparseSpMatDescr_t matA,
+				cusparseSpMatDescr_t matB,
+				const void* beta,
+				cusparseSpMatDescr_t matC,
+				cudaDataType computeType,
+				cusparseSpGEMMDescr_t spgemmDescr,
+				size_t* bufferSize1,
+				void** externalBuffer1,
+				size_t* bufferSize2,
+				void** externalBuffer2);
+
 	// copy from descriptor to actual matrix
 	void copySpGEMM_toMat(cusparseHandle_t handle,
 						  const void* alpha,
@@ -872,10 +913,7 @@ private:
 	// sparse to sparse matmul (cusparse standard)
 	Sparse_mat<T> sparseSparseMatMul(cusparseSpMatDescr_t matB, int64_t B_cols);
 
-	// convert from CSR format to a dense matrix format 
-	void convertCSRformatToDense();
-
-	// get CSR data from sparse matrix descriptor
+	// get CSR data from sparse matrix descriptor (if needed)
 	void getCSR_data(int64_t* rows,
 					 int64_t* cols,
 					 int64_t* nnz,
@@ -883,16 +921,17 @@ private:
 					 void** csrColInd,
 					 void** csrValues,
 					 cusparseIndexType_t* csrRowOffsetsType,
-					 cusparseIndexType_t* csrColIndType,
-					 cusparseIndexBase_t* idxBase,
-					 cudaDataType* valueType);
+					 cusparseIndexType_t* csrColIndType);
 
-	// add using cusparse csrgeam<t> function
-	Sparse_mat<T> sparseSparseMatAdd(cusparseSpMatDescr_t matB);
-
-	// destroy cusparse/Lt descriptors
-	void destroyCuSparseLtMatMulDescriptors();
-	void destroyCuSparseMatDescriptors();
+	// convert from CSR format to a dense matrix format 
+	void convertCSRformatToDense(cusparseHandle_t handle,
+								 cusparseSpMatDescr_t matA,
+								 int64_t* rows,
+								 int64_t* cols,
+								 int64_t* ld,
+								 void** values,
+								 cudaDataType* type,
+								 cusparseOrder_t* order);
 };
 
 // create CSR formatted matrix 
@@ -1071,6 +1110,42 @@ void Sparse_mat<T>::cusparseLtPlanInit(const cusparseLtHandle_t* handle,
 	checkCuSparseErrors(cusparseLtMatmulPlanInit(handle, plan, matmulDescr, algSelection, workspaceSize));
 }
 
+// initialize all needed descriptors for matmul routine
+template<typename T>
+void Sparse_mat<T>::cusparseLtInitDescriptors(const cusparseLtHandle_t** handle,
+											  cusparseLtMatDescriptor_t matDescrs[],
+											  int64_t a_rows, int64_t a_cols,
+											  int64_t b_rows, int64_t b_cols,
+											  int64_t c_rows, int64_t c_cols,
+											  cudaDataType valueType,
+											  cusparseLtMatmulDescriptor_t** matmulDescr,
+											  cusparseLtMatmulAlgSelection_t** algSelection,
+											  cusparseLtMatmulPlan_t** plan) {
+
+	// init A
+	cusparseLtStructuredMatInit(*handle,
+								&matDescrs[0],
+								a_rows, a_cols,
+								a_rows,
+								16,
+								valueType,
+								CUSPARSELT_SPARSITY_50_PERCENT);
+	// init B, C
+	cusparseLtDenseMatInit(*handle, &matDescrs[1], b_rows, b_cols, b_rows, 16, valueType);
+	cusparseLtDenseMatInit(*handle, &matDescrs[2], a_rows, b_cols, a_rows, 16, valueType);
+
+	// initialize matmul descriptor
+	cusparseLtMatMulInit(*handle,
+		*matmulDescr,
+		CUSPARSE_OPERATION_NON_TRANSPOSE,
+		CUSPARSE_OPERATION_NON_TRANSPOSE,
+		&matDescrs[0], &matDescrs[1], &matDescrs[2], &matDescrs[3]);
+	// initialize algorithm selection
+	cusparseLtAlgSelectInit(*handle, *algSelection, *matmulDescr, CUSPARSELT_MATMUL_ALG_DEFAULT);
+	// initialize plan
+	cusparseLtPlanInit(*handle, *plan, *matmulDescr, *algSelection);
+}
+
 // prune structured matrix
 template<typename T>
 void Sparse_mat<T>::cusparseLtSparseMatPrune(const cusparseLtHandle_t* handle,
@@ -1114,6 +1189,40 @@ void Sparse_mat<T>::cusparseLtSparseMatCompress(const cusparseLtHandle_t* handle
 	checkCuSparseErrors(cusparseLtSpMMACompress(handle, plan, d_dense, *d_compressed, stream));
 }
 
+// prune and compress the structured matrix
+template<typename T>
+void Sparse_mat<T>::cusparseLtSparseMatPrune_Compress(const cusparseLtHandle_t* handle,
+													  const cusparseLtMatmulDescriptor_t* matmulDescr,
+													  const cusparseLtMatmulPlan_t* plan,
+													  const T* denseMat,
+													  int sizeA,
+													  memLocation Loc,
+													  void** d_compressed,
+													  cudaStream_t stream) {
+
+	// check if denseMat is in device memory
+	T* d_dense;
+	bool status = checkToAllocateOnDevice(denseMat, &d_dense, sizeA, 1, Loc);
+
+	// allocate d_out
+	T* d_out;
+	checkCudaErrors(cudaMalloc((void**)&d_out, (size_t)sizeA));
+
+	// prune
+	cusparseLtSparseMatPrune(handle,
+							 matmulDescr,
+							 (status) ? (const void*)d_dense : (const void*)denseMat,
+							 (void**)&d_out,
+							 stream);
+
+	// compress
+	cusparseLtSparseMatCompress(handle, plan, d_out, d_compressed, stream);
+
+	// free memory
+	if(status)checkCudaErrors(cudaFree(d_dense));
+	checkCudaErrors(cudaFree(d_out));
+}
+
 // search for fastest algorithm and automatically updates the plan to the optimal multiplication algorithm
 template<typename T>
 void Sparse_mat<T>::cusparseLtSearchOptimalKernel(const cusparseLtHandle_t* handle,
@@ -1123,7 +1232,7 @@ void Sparse_mat<T>::cusparseLtSearchOptimalKernel(const cusparseLtHandle_t* hand
 												  const void* d_B,
 												  const void* beta,
 												  const void* d_C,
-												  void* d_D,
+												  void** d_D,
 												  void* workspace,
 												  cudaStream_t* streams,
 												  int32_t numStreams) {
@@ -1133,7 +1242,7 @@ void Sparse_mat<T>::cusparseLtSearchOptimalKernel(const cusparseLtHandle_t* hand
 											   alpha,
 											   d_A, d_B,
 											   beta,
-											   d_C, d_D,
+											   d_C, *d_D,
 											   workspace,
 											   streams,
 											   numStreams));
@@ -1141,7 +1250,7 @@ void Sparse_mat<T>::cusparseLtSearchOptimalKernel(const cusparseLtHandle_t* hand
 
 // execute sparse-dense matrix multiplication
 template<typename T>
-void Sparse_mat<T>::sparseDenseMatMul(const cusparseLtHandle_t* handle,
+void Sparse_mat<T>::structuredDenseMatMul(const cusparseLtHandle_t* handle,
 								      const cusparseLtMatmulPlan_t* plan,
 									  int sizeA, int sizeB, int sizeC,
 								      const T* A,
@@ -1164,6 +1273,18 @@ void Sparse_mat<T>::sparseDenseMatMul(const cusparseLtHandle_t* handle,
 	bool B_status = checkToAllocateOnDevice(B, &d_B, sizeB, 1, memLocation Bloc);
 	bool C_status = checkToAllocateOnDevice(C, &d_C, sizeC, 1, memLocation Cloc);
 
+	// search for optimal algorithm
+	cusparseLtSearchOptimalKernel(handle, plan,
+								  &alpha,
+								  (A_status) ? d_A : A,
+								  (B_status) ? d_B : B,
+								  &beta,
+								  (C_status) ? d_C : C,
+								  *d_D,
+								  workspace,
+								  streams,
+								  numStreams);
+
 	// perform matrix multiplication
 	checkCuSparseErrors(cusparseLtMatmul(handle, plan,
 										 &alpha,
@@ -1182,39 +1303,71 @@ void Sparse_mat<T>::sparseDenseMatMul(const cusparseLtHandle_t* handle,
 	if (C_status)checkCudaErrors(cudaFree(d_C));
 }
 
-// sparse - dense multiplication
+
+void destroyMatDescrArr(cusparseLtMatDescriptor_t arr[], int N) {
+	for (auto pArr = arr; pArr != arr + N; ++pArr) {
+		checkCuSparseErrors(cusparseLtMatDescriptorDestroy(pArr));
+	}
+}
+
+// sparse - dense multiplication - matrices C, D must be allocated in device memory
 template<typename T>
-void Sparse_mat<T>::sparseDenseMatMul_op() {
+void Sparse_mat<T>::structuredDenseMatMul_op(int64_t b_rows, int64_t b_cols,
+											 const T* B,
+											 memLocation Bloc,
+											 int64_t c_rows, int64_t c_cols,
+											 const T* C, 
+											 memLocation Cloc,
+											 T** D) {
 
 	// init value type
 	auto valueType = cusparseM_T();
 	// create handle and descriptors
-	cusparseLtHandle_t handle; cusparseLtMatDescriptor_t matA;
-	cusparseLtMatDescriptor_t matB; cusparseLtMatDescriptor_t matC;
-	cusparseLtMatDescriptor_t matD;
-	cusparseLtMatmulDescriptor_t matmulDescr;
+	cusparseLtHandle_t handle; 
+	cusparseLtMatDescriptor_t matDescrs[4]; // m[0] = matA, m[1] = matB, m[2] = matC, m[3] = matD
+	cusparseLtMatmulDescriptor_t matmulDescr; 
 	cusparseLtMatmulAlgSelection_t AlgSel;
 	cusparseLtMatmulPlan_t plan;
-	checkCuSparseErrors(cusparseLtInit(&handle));
-	// init A
-	cusparseLtStructuredMatInit(&handle, &matA, M, N, M, 16, valueType, CUSPARSELT_SPARSITY_50_PERCENT);
-	// init B, C
-	cusparseLtDenseMatInit(&handle, &matB, M, N, M, 16, valueType);
-	cusparseLtDenseMatInit(&handle, &matC, M, N, M, 16, valueType);
 
-	// initialize matmul descriptor
-	cusparseLtMatMulInit(&handle,
-						 &matmulDescr,
-						 CUSPARSE_OPERATION_NON_TRANSPOSE,
-						 CUSPARSE_OPERATION_NON_TRANSPOSE,
-						 &matA, &matB, &matC, &matD);
-	// initialize algorithm selection
-	cusparseLtAlgSelectInit(&handle, &AlgSel, &matmulDescr, CUSPARSELT_MATMUL_ALG_DEFAULT);
-	// initialize plan
-	cusparseLtPlanInit(&handle, &plan, &matmulDescr, &AlgSel);
+	// create pointers to descriptors for initialization
+	auto pHandle = &handle; auto pMatmulDescr = &matmulDescr;
+	auto pAlgSel = &AlgSel; auto pPlan = &plan;
 
-	// prune and compress
-	cusparseLtSparseMatPrune(&handle, &matmulDescr, )
+	checkCuSparseErrors(cusparseLtInit(pHandle));
+	// initialize all descriptors
+	cusparseLtInitDescriptors(&pHandle, matDescrs, M, N, b_rows, b_cols, M, b_cols, valueType, &pMatmulDescr, &pAlgSel, &pPlan);
+
+	// create stream
+	cudaStream_t stream;
+	checkCudaErrors(cudaStreamCreate(&stream));
+
+	// prune and compress matrix A (the sparse matrix)
+	T* d_A_cmprs;
+	cusparseLtSparseMatPrune_Compress(pHandle, pMatmulDescr, pPlan, (const T*)data, M * N * sizeof(T), memState, &d_A_cmprs, stream);
+
+	// search for optimal algorithm and execute operation
+
+	structuredDenseMatMul(pHandle,
+						  pPlan,
+						  M * N * sizeof(T), 
+						  b_rows * b_cols * sizeof(T),
+						  c_rows * c_cols * sizeof(T),
+						  (const T*)d_A_cmprs,
+						  memLocation::DEVICE,
+						  (const T*)B,
+						  Bloc,
+						  (const T*)C,
+						  Cloc, 
+						  D, 
+						  nullptr, 
+						  &stream, 1);
+
+	// free memory
+	checkCudaErrors(cudaStreamDestroy(stream));
+	checkCudaErrors(cudaFree(d_A_cmprs));
+	destroyMatDescrArr(matDescrs, 4);
+	checkCuSparseErrors(cusparseLtMatmulPlanDestroy(pPlan));
+	checkCuSparseErrors(cusparseDestroy(handle));
 }
 
 /*
@@ -1426,6 +1579,42 @@ void Sparse_mat<T>::computeSpGEMM_allocBuffers(cusparseHandle_t handle,
 											   *externalBuffer2));
 }
 
+// compute result with spGEMM algorithm
+template<typename T>
+void Sparse_mat<T>::spGEMM(cusparseHandle_t handle,
+						   const void* alpha,
+						   cusparseSpMatDescr_t matA,
+						   cusparseSpMatDescr_t matB,
+						   const void* beta,
+						   cusparseSpMatDescr_t matC,
+						   cudaDataType computeType,
+						   cusparseSpGEMMDescr_t spgemmDescr,
+						   size_t* bufferSize1,
+						   void** externalBuffer1,
+						   size_t* bufferSize2,
+						   void** externalBuffer2) {
+
+	getWorkEstimation_allocBuffers(handle,
+								   alpha,
+								   matA, matB,
+								   beta,
+								   matC,
+								   computeType,
+								   spgemmDescr,
+								   bufferSize1,
+								   externalBuffer1);
+
+	computeSpGEMM_allocBuffers(handle,
+							   alpha,
+							   matA, matB,
+							   beta,
+							   matC,
+							   computeType,
+							   spgemmDescr,
+							   bufferSize2,
+							   externalBuffer2);
+}
+
 // copy the results to a seperate matrix - from descriptor
 template<typename T>
 void Sparse_mat<T>::copySpGEMM_toMat(cusparseHandle_t handle,
@@ -1467,27 +1656,18 @@ Sparse_mat<T> Sparse_mat<T>::sparseSparseMatMul(cusparseSpMatDescr_t matB, int64
 	cusparseSpGEMMDescr_t spgemmDesc;
 	checkCuSparseErrors(cusparseSpGEMM_createDescr(&spgemmDescr));
 	
-	// get workspace
-	getWorkEstimation_allocBuffers(handle,
-								   &alpha,
-								   SpMatDescr, matB,
-								   &beta,
-								   C.SpMatDescr,
-								   computeType,
-								   spgemmDesc,
-								   &bufferSize1,
-								   &dBuffer1);
-
-	// compute
-	computeSpGEMM_allocBuffers(handle,
-							   &alpha,
-							   SpMatDescr, matB,
-							   &beta,
-							   C.SpMatDescr,
-							   computeType,
-							   spgemmDesc,
-							   &bufferSize2,
-							   &dBuffer2);
+	// get workspace and compute
+	spGEMM(handle,
+           &alpha,
+		   SpMatDescr, matB,
+		   &beta,
+		   C.SpMatDescr,
+		   computeType,
+		   spgemmDesc,
+		   &bufferSize1,
+		   &dBuffer1,
+		   &bufferSize2,
+		   &dBuffer2);
 
 	// get nnz after computation
 	int64_t C_rows, C_cols, C_nnz;
@@ -1510,361 +1690,68 @@ Sparse_mat<T> Sparse_mat<T>::sparseSparseMatMul(cusparseSpMatDescr_t matB, int64
 	return C;
 }
 
+// get CSR data from sparse matrix descriptor
+template<typename T>
+void Sparse_mat<T>::getCSR_data(int64_t* rows,
+								int64_t* cols,
+								int64_t* nnz,
+								void** csrRowOffsets,
+								void** csrColInd,
+								void** csrValues,
+								cusparseIndexType_t* csrRowOffsetsType,
+								cusparseIndexType_t* csrColIndType){
+
+	cusparseIndexBase_t idxBase = CUSPARSE_INDEX_BASE_ZERO;
+	cudaDataType valueType = cusparseM_T();
+	checkCuSparseErrors(cusparseCsrGet(SpMatDescr,
+									   rows, cols,
+									   nnz,
+									   csrRowOffsets,
+									   csrColInd,
+									   csrValues,
+									   csrRowOffsetsType,
+									   &idxBase,
+									   valueType));
+}
+
+// convert back from csr to dense matrix format
+template<typename T>
+void Sparse_mat<T>::convertCSRformatToDense(cusparseHandle_t handle,
+											cusparseSpMatDescr_t matA,
+											int64_t* rows,
+											int64_t* cols,
+											int64_t* ld,
+											void** values,
+											cudaDataType* type,
+											cusparseOrder_t* order) {
+
+	// get buffer size and allocate buffer
+	cusparseDnMatDescr_t matB;
+	size_t bufferSize; void* buffer;
+	checkCuSparseErrors(cusparseSparseToDense_bufferSize(handle,
+														 matA, matB,
+														 CUSPARSE_SPARSETODENSE_ALG_DEFAULT,
+														 &bufferSize));
+	checkCudaErrors(cudaMalloc(&buffer, bufferSize));
+
+	// convert
+	checkCuSparseErrors(cusparseSparseToDense(handle, matA, matB, CUSPARSE_SPARSETODENSE_ALG_DEFAULT, buffer));
+
+	// get dense format data
+	checkCuSparseErrors(cusparseDnMatGet(matB, rows, cols, ld, values, type, order));
+
+	// free memory
+	checkCudaErrors(cudaFree(buffer));
+	checkCuSparseErrors(cusparseDestroyDnMat(matB));
+}
 
 /*
------------------------- operation C = alpha*A + beta*B ------------------------
+---------------------------------------------------------------------------------------------------
+------------------------------VECTOR CLASS (MATRIX-VECTOR OPERATIONS)------------------------------
+---------------------------------------------------------------------------------------------------
 */
 
-// wrappers for geam2 sparse-sparse matrix addition
-// buffer allocation and workspace estimation
-
-// overload (1) - float32
-void cusparseGeamBufferSizeExt(cusparseHandle_t handle,
-							   int m,
-							   int n,
-							   const float* alpha,
-							   const cusparseMatDescr_t descrA,
-							   int nnzA,
-							   const float* csrSortedValA,
-							   const int* csrSortedRowPtrA,
-							   const int* csrSortedColIndA,
-							   const float* beta,
-							   const cusparseMatDescr_t descrB,
-							   int nnzB,
-							   const float* csrSortedValB,
-							   const int* csrSortedRowPtrB,
-							   const int* csrSortedColIndB,
-							   const cusparseMatDescr_t descrC,
-							   const float* csrSortedValC,
-							   const int* csrSortedRowPtrC,
-							   const int* csrSortedColIndC,
-							   size_t* pBufferSizeInBytes) {
-
-	checkCuSparseErrors(cusparseScsrgeam2_bufferSizeExt(handle,
-														m, n,
-														alpha,
-														descrA, 
-														nnzA,
-														csrSortedValA,
-														csrSortedRowPtrA, 
-														csrSortedColIndA,
-														beta,
-														descrB,
-														nnzB,
-														csrSortedValB,
-														csrSortedRowPtrB,
-														csrSortedColIndB,
-														descrC,
-														csrSortedValC, 
-														csrSortedRowPtrC,
-														csrSortedColIndC,
-														pBufferSizeInBytes));
-}
-
-// overload (2) - double (float64)
-void cusparseGeamBufferSizeExt(cusparseHandle_t handle,
-							   int m,
-							   int n,
-							   const double* alpha,
-							   const cusparseMatDescr_t descrA,
-							   int nnzA,
-							   const double* csrSortedValA,
-							   const int* csrSortedRowPtrA,
-							   const int* csrSortedColIndA,
-							   const double* beta,
-							   const cusparseMatDescr_t descrB,
-							   int nnzB,
-							   const double* csrSortedValB,
-							   const int* csrSortedRowPtrB,
-							   const int* csrSortedColIndB,
-							   const cusparseMatDescr_t descrC,
-							   const double* csrSortedValC,
-							   const int* csrSortedRowPtrC,
-							   const int* csrSortedColIndC,
-							   size_t* pBufferSizeInBytes) {
-
-	checkCuSparseErrors(cusparseDcsrgeam2_bufferSizeExt(handle,
-														m, n,
-														alpha,
-														descrA,
-														nnzA,
-														csrSortedValA,
-														csrSortedRowPtrA,
-														csrSortedColIndA,
-														beta,
-														descrB,
-														nnzB,
-														csrSortedValB,
-														csrSortedRowPtrB,
-														csrSortedColIndB,
-														descrC,
-														csrSortedValC,
-														csrSortedRowPtrC,
-														csrSortedColIndC,
-														pBufferSizeInBytes));
-}
-
-// overload (3) - cuComplex
-void cusparseGeamBufferSizeExt(cusparseHandle_t handle,
-							   int m,
-							   int n,
-							   const cuComplex* alpha,
-							   const cusparseMatDescr_t descrA,
-							   int nnzA,
-							   const cuComplex* csrSortedValA,
-							   const int* csrSortedRowPtrA,
-							   const int* csrSortedColIndA,
-							   const cuComplex* beta,
-							   const cusparseMatDescr_t descrB,
-							   int nnzB,
-							   const cuComplex* csrSortedValB,
-							   const int* csrSortedRowPtrB,
-							   const int* csrSortedColIndB,
-							   const cusparseMatDescr_t descrC,
-							   const cuComplex* csrSortedValC,
-							   const int* csrSortedRowPtrC,
-							   const int* csrSortedColIndC,
-							   size_t* pBufferSizeInBytes) {
-
-	checkCuSparseErrors(cusparseCcsrgeam2_bufferSizeExt(handle,
-														m, n,
-														alpha,
-														descrA,
-														nnzA,
-														csrSortedValA,
-														csrSortedRowPtrA,
-														csrSortedColIndA,
-														beta,
-														descrB,
-														nnzB,
-														csrSortedValB,
-														csrSortedRowPtrB,
-														csrSortedColIndB,
-														descrC,
-														csrSortedValC,
-														csrSortedRowPtrC,
-														csrSortedColIndC,
-														pBufferSizeInBytes));
-}
-
-// overload (4) - cuDoubleComplex
-void cusparseGeamBufferSizeExt(cusparseHandle_t handle,
-							   int m,
-							   int n,
-							   const cuDoubleComplex* alpha,
-							   const cusparseMatDescr_t descrA,
-							   int nnzA,
-							   const cuDoubleComplex* csrSortedValA,
-							   const int* csrSortedRowPtrA,
-							   const int* csrSortedColIndA,
-							   const cuDoubleComplex* beta,
-							   const cusparseMatDescr_t descrB,
-							   int nnzB,
-							   const cuDoubleComplex* csrSortedValB,
-							   const int* csrSortedRowPtrB,
-							   const int* csrSortedColIndB,
-							   const cusparseMatDescr_t descrC,
-							   const cuDoubleComplex* csrSortedValC,
-							   const int* csrSortedRowPtrC,
-							   const int* csrSortedColIndC,
-							   size_t* pBufferSizeInBytes) {
-
-	checkCuSparseErrors(cusparseZcsrgeam2_bufferSizeExt(handle,
-														m, n,
-														alpha,
-														descrA,
-														nnzA,
-														csrSortedValA,
-														csrSortedRowPtrA,
-														csrSortedColIndA,
-														beta,
-														descrB,
-														nnzB,
-														csrSortedValB,
-														csrSortedRowPtrB,
-														csrSortedColIndB,
-														descrC,
-														csrSortedValC,
-														csrSortedRowPtrC,
-														csrSortedColIndC,
-														pBufferSizeInBytes));
-}
-
-// compute operation overloads for accepted type
-// overload (1) - float32
-void cusparseCsrGeam(cusparseHandle_t handle,
-					 int m,
-					 int n,
-					 const float* alpha,
-					 const cusparseMatDescr_t descrA,
-					 int nnzA,
-					 const float* csrSortedValA,
-					 const int* csrSortedRowPtrA,
-					 const int* csrSortedColIndA,
-					 const float* beta,
-					 const cusparseMatDescr_t descrB,
-					 int nnzB,
-					 const float* csrSortedValB,
-					 const int* csrSortedRowPtrB,
-					 const int* csrSortedColIndB,
-					 const cusparseMatDescr_t descrC,
-					 float* csrSortedValC,
-					 int* csrSortedRowPtrC,
-					 int* csrSortedColIndC,
-					 void* pBuffer) {
-
-	checkCuSparseErrors(cusparseScsrgeam2(handle,
-										  m, n,
-										  alpha,
-										  descrA,
-										  nnzA,
-										  csrSortedValA,
-										  csrSortedRowPtrA,
-										  csrSortedColIndA,
-										  beta,
-										  descrB,
-										  nnzB,
-										  csrSortedValB,
-										  csrSortedRowPtrB,
-										  csrSortedColIndB,
-										  descrC,
-										  csrSortedValC,
-										  csrSortedRowPtrC,
-										  csrSortedColIndC,
-										  pBuffer));
-}
-
-// overload (2) - double
-void cusparseCsrGeam(cusparseHandle_t handle,
-					 int m,
-					 int n,
-					 const double* alpha,
-					 const cusparseMatDescr_t descrA,
-					 int nnzA,
-					 const double* csrSortedValA,
-					 const int* csrSortedRowPtrA,
-					 const int* csrSortedColIndA,
-					 const double* beta,
-					 const cusparseMatDescr_t descrB,
-					 int nnzB,
-					 const double* csrSortedValB,
-					 const int* csrSortedRowPtrB,
-					 const int* csrSortedColIndB,
-					 const cusparseMatDescr_t descrC,
-					 double* csrSortedValC,
-					 int* csrSortedRowPtrC,
-					 int* csrSortedColIndC,
-					 void* pBuffer) {
-
-	checkCuSparseErrors(cusparseDcsrgeam2(handle,
-										  m, n,
-										  alpha,
-										  descrA,
-										  nnzA,
-										  csrSortedValA,
-										  csrSortedRowPtrA,
-										  csrSortedColIndA,
-										  beta,
-										  descrB,
-										  nnzB,
-										  csrSortedValB,
-										  csrSortedRowPtrB,
-										  csrSortedColIndB,
-										  descrC,
-										  csrSortedValC,
-										  csrSortedRowPtrC,
-										  csrSortedColIndC,
-										  pBuffer));
-}
-
-// overload (3) - cuComplex
-void cusparseCsrGeam(cusparseHandle_t handle,
-					 int m,
-					 int n,
-					 const cuComplex* alpha,
-					 const cusparseMatDescr_t descrA,
-				 	 int nnzA,
-					 const cuComplex* csrSortedValA,
-					 const int* csrSortedRowPtrA,
-					 const int* csrSortedColIndA,
-					 const cuComplex* beta,
-					 const cusparseMatDescr_t descrB,
-					 int nnzB,
-					 const cuComplex* csrSortedValB,
-					 const int* csrSortedRowPtrB,
-					 const int* csrSortedColIndB,
-					 const cusparseMatDescr_t descrC,
-					 cuComplex* csrSortedValC,
-					 int* csrSortedRowPtrC,
-					 int* csrSortedColIndC,
-					 void* pBuffer) {
-
-	checkCuSparseErrors(cusparseCcsrgeam2(handle,
-										  m, n,
-										  alpha,
-										  descrA,
-										  nnzA,
-										  csrSortedValA,
-										  csrSortedRowPtrA,
-										  csrSortedColIndA,
-										  beta,
-										  descrB,
-										  nnzB,
-										  csrSortedValB,
-										  csrSortedRowPtrB,
-										  csrSortedColIndB,
-										  descrC,
-										  csrSortedValC,
-										  csrSortedRowPtrC,
-										  csrSortedColIndC,
-										  pBuffer));
-}
-
-// overload (4) - cuDoubleComplex
-void cusparseCsrGeam(cusparseHandle_t handle,
-					 int m,
-					 int n,
-					 const cuDoubleComplex* alpha,
-					 const cusparseMatDescr_t descrA,
-					 int nnzA,
-					 const cuDoubleComplex* csrSortedValA,
-					 const int* csrSortedRowPtrA,
-					 const int* csrSortedColIndA,
-					 const cuDoubleComplex* beta,
-					 const cusparseMatDescr_t descrB,
-					 int nnzB,
-					 const cuDoubleComplex* csrSortedValB,
-					 const int* csrSortedRowPtrB,
-					 const int* csrSortedColIndB,
-					 const cusparseMatDescr_t descrC,
-					 cuDoubleComplex* csrSortedValC,
-					 int* csrSortedRowPtrC,
-					 int* csrSortedColIndC,
-					 void* pBuffer) {
-	 
-	checkCuSparseErrors(cusparseZcsrgeam2(handle,
-										  m, n,
-										  alpha,
-										  descrA,
-										  nnzA,
-										  csrSortedValA,
-										  csrSortedRowPtrA,
-										  csrSortedColIndA,
-										  beta,
-										  descrB,
-										  nnzB,
-										  csrSortedValB,
-										  csrSortedRowPtrB,
-										  csrSortedColIndB,
-										  descrC,
-										  csrSortedValC,
-										  csrSortedRowPtrC,
-										  csrSortedColIndC,
-										  pBuffer));
-}
-
-// execute sparse-sparse matrix addition
 template<typename T>
-Sparse_mat<T> Sparse_mat<T>::sparseSparseMatAdd(cusparseSpMatDescr_t matB) {
+class nDvector {
 
-}
+};
