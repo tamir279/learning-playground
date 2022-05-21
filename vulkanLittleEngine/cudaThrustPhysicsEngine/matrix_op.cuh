@@ -212,7 +212,7 @@ public:
 			   CUBLAS_GEMM_DEFAULT);
 
 		// copy back to this matrix
-		(HOST_ALLOC(memState))
+		(HOST_ALLOC(memState) && N == C.N)
 			? copyDeviceToHost(C.data, data, M, N) : copyDeviceToDevice(C.data, data, M, N);
 		return *this;
 	}
@@ -689,17 +689,14 @@ public:
 	void createCSR();
 	void destroyCSR();
 
-	// matrix - vector product adding
-	Sparse_mat<T> operator+();
-	Sparse_mat<T>& operator+=();
 	// sparse on dense
-	Sparse_mat<T> operator*();
+	Sparse_mat<T> operator*(const mat<T>& B);
 	// sparse on sparse
-	Sparse_mat<T> operator*();
+	Sparse_mat<T> operator*(const Sparse_mat<T>& B);
 	// sparse on dense
-	Sparse_mat<T>& operator*=();
+	Sparse_mat<T>& operator*=(const mat<T>& B);
 	// sparse on sparse
-	Sparse_mat<T>& operator*=();
+	Sparse_mat<T>& operator*=(const Sparse_mat<T>& B);
 
 private:
 	/*
@@ -924,14 +921,7 @@ private:
 					 cusparseIndexType_t* csrColIndType);
 
 	// convert from CSR format to a dense matrix format 
-	void convertCSRformatToDense(cusparseHandle_t handle,
-								 cusparseSpMatDescr_t matA,
-								 int64_t* rows,
-								 int64_t* cols,
-								 int64_t* ld,
-								 void** values,
-								 cudaDataType* type,
-								 cusparseOrder_t* order);
+	void convertCSRformatToDense(cusparseSpMatDescr_t matA, void** values);
 };
 
 // create CSR formatted matrix 
@@ -1132,7 +1122,7 @@ void Sparse_mat<T>::cusparseLtInitDescriptors(const cusparseLtHandle_t** handle,
 								CUSPARSELT_SPARSITY_50_PERCENT);
 	// init B, C
 	cusparseLtDenseMatInit(*handle, &matDescrs[1], b_rows, b_cols, b_rows, 16, valueType);
-	cusparseLtDenseMatInit(*handle, &matDescrs[2], a_rows, b_cols, a_rows, 16, valueType);
+	cusparseLtDenseMatInit(*handle, &matDescrs[2], c_rows, c_cols, c_rows, 16, valueType);
 
 	// initialize matmul descriptor
 	cusparseLtMatMulInit(*handle,
@@ -1351,7 +1341,7 @@ void Sparse_mat<T>::structuredDenseMatMul_op(int64_t b_rows, int64_t b_cols,
 						  pPlan,
 						  M * N * sizeof(T), 
 						  b_rows * b_cols * sizeof(T),
-						  c_rows * c_cols * sizeof(T),
+						  M * b_cols * sizeof(T),
 						  (const T*)d_A_cmprs,
 						  memLocation::DEVICE,
 						  (const T*)B,
@@ -1658,9 +1648,9 @@ Sparse_mat<T> Sparse_mat<T>::sparseSparseMatMul(cusparseSpMatDescr_t matB, int64
 	
 	// get workspace and compute
 	spGEMM(handle,
-           &alpha,
+           (const void*)&alpha,
 		   SpMatDescr, matB,
-		   &beta,
+		   (const void*)&beta,
 		   C.SpMatDescr,
 		   computeType,
 		   spgemmDesc,
@@ -1716,18 +1706,15 @@ void Sparse_mat<T>::getCSR_data(int64_t* rows,
 
 // convert back from csr to dense matrix format
 template<typename T>
-void Sparse_mat<T>::convertCSRformatToDense(cusparseHandle_t handle,
-											cusparseSpMatDescr_t matA,
-											int64_t* rows,
-											int64_t* cols,
-											int64_t* ld,
-											void** values,
-											cudaDataType* type,
-											cusparseOrder_t* order) {
+void Sparse_mat<T>::convertCSRformatToDense(cusparseSpMatDescr_t matA, void** values) {
 
 	// get buffer size and allocate buffer
+	cusparseHandle_t handle;
 	cusparseDnMatDescr_t matB;
 	size_t bufferSize; void* buffer;
+	// create handle
+	checkCuSparseErrors(cusparseCreate(&handle));
+
 	checkCuSparseErrors(cusparseSparseToDense_bufferSize(handle,
 														 matA, matB,
 														 CUSPARSE_SPARSETODENSE_ALG_DEFAULT,
@@ -1738,11 +1725,75 @@ void Sparse_mat<T>::convertCSRformatToDense(cusparseHandle_t handle,
 	checkCuSparseErrors(cusparseSparseToDense(handle, matA, matB, CUSPARSE_SPARSETODENSE_ALG_DEFAULT, buffer));
 
 	// get dense format data
-	checkCuSparseErrors(cusparseDnMatGet(matB, rows, cols, ld, values, type, order));
+	checkCuSparseErrors(cusparseDnMatGetValues(matB, values));
 
 	// free memory
 	checkCudaErrors(cudaFree(buffer));
 	checkCuSparseErrors(cusparseDestroyDnMat(matB));
+	checkCuSparseErrors(cusparseDestroy(handle));
+}
+
+// multiplication operator for structured-dense matrices
+template<typename T>
+Sparse_mat<T> Sparse_mat<T>::operator*(const mat<T>& B) {
+	Sparse_mat<T> D(M, B.N, memLocation::DEVICE);
+	// create a C matrix for output
+	T* C;
+	checkCudaErrors(cudaMalloc((void**)&C, M * B.N * sizeof(T)));
+
+	// multiply D(M,B.N) = A(M,N)B(N,B.N)
+	structuredDenseMatMul_op(B.M, B.N, B.data, B.memState, M, B.N, C, memLocation::DEVICE, &D.data);
+
+	// free memory
+	checkCudaErrors(cudaFree(C));
+
+	return D;
+}
+
+// multiplication operator for sparse-sparse matrices
+template<typename T>
+Sparse_mat<T> Sparse_mat<T>::operator*(const Sparse_mat<T>& B) {
+	Sparse_mat<T> C = sparseSparseMatMul(B.SpMatDescr, B.N);
+
+	// convert data in csr format back to standard data
+	convertCSRformatToDense(C.SpMatDescr, &C.data);
+	return C;
+}
+
+// multiply and store the result in A - sparse-dense multiplication
+template<typename T>
+Sparse_mat<T>& Sparse_mat<T>::operator*=(const mat<T>& B) {
+	Sparse_mat<T> D(M, B.N, memLocation::DEVICE);
+	// create a C matrix for output
+	T* C;
+	checkCudaErrors(cudaMalloc((void**)&C, M * B.N * sizeof(T)));
+
+	// multiply D(M,B.N) = A(M,N)B(N,B.N)
+	structuredDenseMatMul_op(B.M, B.N, B.data, B.memState, M, B.N, C, memLocation::DEVICE, &D.data);
+
+	// free memory
+	checkCudaErrors(cudaFree(C));
+
+	// copy back to this matrix
+	(HOST_ALLOC(memState) && N == B.N)
+		? copyDeviceToHost(D.data, data, M, N) : copyDeviceToDevice(D.data, data, M, N);
+
+	return *this;
+}
+
+// multiply and store the result in A. for sparse-sparse matrices
+template<typename T>
+Sparse_mat<T>& Sparse_mat<T>::operator*=(const Sparse_mat<T>& B) {
+	Sparse_mat<T> C = sparseSparseMatMul(B.SpMatDescr, B.N);
+
+	// convert data in csr format back to standard data
+	convertCSRformatToDense(C.SpMatDescr, &C.data);
+
+	// copy the matrix to memory
+	(HOST_ALLOC(memState) && N == B.N)
+		? copyDeviceToHost(C.data, data, M, N) : copyDeviceToDevice(C.data, data, M, N);
+
+	return *this;
 }
 
 /*
