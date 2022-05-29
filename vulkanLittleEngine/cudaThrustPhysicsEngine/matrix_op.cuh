@@ -19,7 +19,7 @@ __global__ void printMeDev(float* P, int m, int n) {;
 
 __global__ void printArr_di64(int64_t* P, int l) {
 	for (int i = 0; i < l; i++) {
-		printf("%d ", P[i]);
+		printf("%d ", (int)P[i]);
 	}
 	printf("\n");
 }
@@ -107,6 +107,15 @@ inline void cublasAssert(cublasStatus_t code, const char* file, int line, bool a
 			break;
 		}
 		if (abort) exit(code);
+	}
+}
+
+// generic function for handling GPU memory releases 
+template<typename... args>
+void cudaFreeMem(args*... rawPts) {
+	auto arg_vec = { rawPts... };
+	for (auto elem : arg_vec) {
+		checkCudaErrors(cudaFree(elem));
 	}
 }
 
@@ -850,7 +859,8 @@ private:
 						   int64_t rows,
 						   int64_t cols,
 						   int64_t ld,
-						   const T* values);
+						   const T* values,
+						   T** device_values);
 
 	// create the CSR format in the sparse matrix descriptor
 	void createCsrSparse(cusparseSpMatDescr_t* spMatDescr,
@@ -936,7 +946,7 @@ private:
 					 cusparseIndexType_t* csrColIndType);
 
 	// convert from CSR format to a dense matrix format 
-	void convertCSRformatToDense(cusparseSpMatDescr_t matA, void** values);
+	void convertCSRformatToDense(cusparseSpMatDescr_t matA, T** values, int rows, int cols, int ld);
 };
 
 // create CSR formatted matrix 
@@ -965,9 +975,7 @@ void Sparse_mat<T>::createCSR() {
 // destroy CSR format sparse matrix handle and free all csr arrays
 template<typename T>
 void Sparse_mat<T>::destroyCSR() {
-	checkCudaErrors(cudaFree(csrRowOffsets));
-	checkCudaErrors(cudaFree(csrColInd));
-	checkCudaErrors(cudaFree(csrValues));
+	cudaFreeMem((void*)csrRowOffsets, (void*)csrColInd, (void*)csrValues);
 	checkCuSparseErrors(cusparseDestroySpMat(SpMatDescr));
 }
 
@@ -1403,11 +1411,11 @@ void Sparse_mat<T>::createDenseFormat(cusparseDnMatDescr_t* dnMatDescr,
 									  int64_t rows,
 									  int64_t cols,
 									  int64_t ld,
-									  const T* values) {
+									  const T* values,
+									  T** device_values) {
 
 	// check if the matrix is in device or not
-	T* d_values; 
-	bool Dense_status = checkToAllocateOnDevice(values, &d_values, (int)rows, (int)cols, memState);
+	bool Dense_status = checkToAllocateOnDevice(values, device_values, (int)rows, (int)cols, memState);
 
 	// create dense matrix handle
 	cudaDataType valueType = cusparseM_T();
@@ -1415,12 +1423,9 @@ void Sparse_mat<T>::createDenseFormat(cusparseDnMatDescr_t* dnMatDescr,
 											rows,
 											cols,
 											ld,
-											(Dense_status) ? (void*)d_values : (void*)values,
+											(Dense_status) ? (void*)*device_values : (void*)values,
 											valueType,
 											CUSPARSE_ORDER_COL));
-	
-	// free d_values
-	checkCudaErrors(cudaFree(d_values));
 }
 
 // create a csr formatted sparse matrix representation
@@ -1440,8 +1445,8 @@ void Sparse_mat<T>::createCsrSparse(cusparseSpMatDescr_t* spMatDescr,
 										  *csrRowOffsets,
 										  *csrColInd,
 										  *csrValues,
-										  CUSPARSE_INDEX_32I,
-										  CUSPARSE_INDEX_32I,
+										  CUSPARSE_INDEX_64I,
+										  CUSPARSE_INDEX_64I,
 										  CUSPARSE_INDEX_BASE_ZERO,
 										  valueType));
 }
@@ -1479,17 +1484,14 @@ void Sparse_mat<T>::convertDenseToCsrFormat(cusparseHandle_t handle,
 	checkCudaErrors(cudaMalloc((void**)d_csrRowOffsets, (rows + 1) * sizeof(int64_t))); // REMEMBER TO FREE
 
 	// build a dense matrix from the current matrix - if the matrix is on the host, allocate memory on device
-	cusparseDnMatDescr_t matA;
-	createDenseFormat(&matA, rows, cols, ld, values);
-	printf("\n finished setting dense matrix \n");
+	cusparseDnMatDescr_t matA; T* d_values;
+	createDenseFormat(&matA, rows, cols, ld, values, &d_values);
 	// create csr formatted sparse matrix
 	void* dummyCols; void* dummyVals;
 	createCsrSparse(matB, rows, cols, 0, (void**)d_csrRowOffsets, &dummyCols, &dummyVals);
-	printf("\n finished setting sparse matrix \n");
 	// allocate external buffer if needed
 	size_t bufferSize; T* dBuffer;
 	alloc_analyze_convertBuffer(handle, matA, *matB, alg, &bufferSize, (void**)&dBuffer);
-	printf("\n allocated buffer for convertion \n");
 	// get the nnz
 	int64_t rows_tmp, cols_tmp, nnz;
 	checkCuSparseErrors(cusparseSpMatGetSize(*matB, &rows_tmp, &cols_tmp, &nnz));
@@ -1500,15 +1502,10 @@ void Sparse_mat<T>::convertDenseToCsrFormat(cusparseHandle_t handle,
 
 	// set all pointers
 	checkCuSparseErrors(cusparseCsrSetPointers(*matB, *d_csrRowOffsets, *d_csrColInd, *d_csrValues));
-	printf("converting\n");
 	// convert
 	checkCuSparseErrors(cusparseDenseToSparse_convert(handle, matA, *matB, alg, dBuffer));
-	printf("%d \n", (int)nnz);
-	printArr_df32<<<1,1>>>(*d_csrValues, nnz);
-	printArr_di64<<<1,1>>>(*d_csrColInd, nnz);
-	printArr_di64<<<1,1>>>(*d_csrRowOffsets, rows + 1);
 	// free memory
-	checkCudaErrors(cudaFree(dBuffer));
+	cudaFreeMem((void*)dBuffer, (void*)d_values);
 	checkCuSparseErrors(cusparseDestroyDnMat(matA));
 }
 
@@ -1665,7 +1662,8 @@ template<typename T>
 Sparse_mat<T> Sparse_mat<T>::sparseSparseMatMul(cusparseSpMatDescr_t matB, int64_t B_cols) {
 	Sparse_mat<T> C(M, (int)B_cols, memLocation::DEVICE);
 	// create C handle
-	createCsrSparse(&C.SpMatDescr, C.M, C.N, 0, NULL, NULL, NULL); cusparseHandle_t handle;
+	void* dR; void* dC; void* dV;
+	createCsrSparse(&C.SpMatDescr, C.M, C.N, 0, &dR, &dC, &dV); cusparseHandle_t handle;
 	checkCuSparseErrors(cusparseCreate(&handle));
 
 	// set parameters
@@ -1705,7 +1703,7 @@ Sparse_mat<T> Sparse_mat<T>::sparseSparseMatMul(cusparseSpMatDescr_t matB, int64
 	copySpGEMM_toMat(handle, &alpha, SpMatDescr, matB, &beta, C.SpMatDescr, computeType, spgemmDescr);
 
 	// destroy handles
-	checkCudaErrors(cudaFree(dBuffer1)); checkCudaErrors(cudaFree(dBuffer2));
+	cudaFreeMem((void*)dBuffer1, (void*)dBuffer2);
 	checkCuSparseErrors(cusparseSpGEMM_destroyDescr(spgemmDescr));
 	checkCuSparseErrors(cusparseDestroy(handle));
 
@@ -1738,7 +1736,7 @@ void Sparse_mat<T>::getCSR_data(int64_t* rows,
 
 // convert back from csr to dense matrix format
 template<typename T>
-void Sparse_mat<T>::convertCSRformatToDense(cusparseSpMatDescr_t matA, void** values) {
+void Sparse_mat<T>::convertCSRformatToDense(cusparseSpMatDescr_t matA, T** values, int rows, int cols, int ld) {
 
 	// get buffer size and allocate buffer
 	cusparseHandle_t handle;
@@ -1746,6 +1744,9 @@ void Sparse_mat<T>::convertCSRformatToDense(cusparseSpMatDescr_t matA, void** va
 	size_t bufferSize; void* buffer;
 	// create handle
 	checkCuSparseErrors(cusparseCreate(&handle));
+	// create dense matrix
+	T* d_values;
+	createDenseFormat(&matB, (int64_t)rows, (int64_t)cols, (int64_t)ld, (const T*)(*values), &d_values);
 
 	checkCuSparseErrors(cusparseSparseToDense_bufferSize(handle,
 														 matA, matB,
@@ -1757,10 +1758,10 @@ void Sparse_mat<T>::convertCSRformatToDense(cusparseSpMatDescr_t matA, void** va
 	checkCuSparseErrors(cusparseSparseToDense(handle, matA, matB, CUSPARSE_SPARSETODENSE_ALG_DEFAULT, buffer));
 
 	// get dense format data
-	checkCuSparseErrors(cusparseDnMatGetValues(matB, values));
+	checkCuSparseErrors(cusparseDnMatGetValues(matB, (void**)values));
 
 	// free memory
-	checkCudaErrors(cudaFree(buffer));
+	cudaFreeMem((void*)buffer, (void*)d_values);
 	checkCuSparseErrors(cusparseDestroyDnMat(matB));
 	checkCuSparseErrors(cusparseDestroy(handle));
 }
@@ -1789,7 +1790,7 @@ Sparse_mat<T> Sparse_mat<T>::operator*(const Sparse_mat<T>& B) {
 	Sparse_mat<T> C = sparseSparseMatMul(B.SpMatDescr, B.N);
 
 	// convert data in csr format back to standard data
-	convertCSRformatToDense(C.SpMatDescr, (void**)&C.data);
+	convertCSRformatToDense(C.SpMatDescr, &C.data, C.M, C.N, C.M);
 	return C;
 }
 
@@ -1821,7 +1822,7 @@ Sparse_mat<T>& Sparse_mat<T>::operator*=(const Sparse_mat<T>& B) {
 	Sparse_mat<T> C = sparseSparseMatMul(B.SpMatDescr, B.N);
 
 	// convert data in csr format back to standard data
-	convertCSRformatToDense(C.SpMatDescr, &C.data);
+	convertCSRformatToDense(C.SpMatDescr, &C.data, C.M, C.N, C.M);
 
 	// copy the matrix to memory
 	(HOST_ALLOC(memState) && N == B.N)
