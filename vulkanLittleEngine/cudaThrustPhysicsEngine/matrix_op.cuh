@@ -127,6 +127,8 @@ void cudaFreeMem(args*... rawPts) {
 
 // three memory maps
 enum class memLocation { HOST, HOST_PINNED, DEVICE };
+// factorization type
+enum DECOMP {LU, QR, CHOL, LS};
 
 // matrix class in column major order
 template<typename T>
@@ -135,7 +137,10 @@ public:
 	// thee matrix data
 	T* data;
 	// dimensions
-	int M; int N; memLocation memState;
+	int M; int N;
+	memLocation memState;
+	// empty or not
+	bool empty = false;
 
 	mat(int n_rows, int n_cols, memLocation memLoc) {
 		// inputs
@@ -152,7 +157,12 @@ public:
 		}
 	}
 
-	// 
+	// empty constructor
+	mat() {
+		empty = true;
+	}
+
+	// copy constructor
 	mat(const mat<T>& obj) {
 		// copy parameters
 		this->M = obj.M;
@@ -173,6 +183,7 @@ public:
 
 	// operators
 	mat<T>& operator+=(const mat<T>& B) {
+		if (empty) throw std::length_error("empty data ");
 		// allocate result matrix on device for cublas computation
 		mat<T> C(M, N, memLocation::DEVICE);
 
@@ -212,6 +223,7 @@ public:
 	}
 
 	mat<T>& operator*=(const mat<T>& B) {
+		if (empty) throw std::length_error("empty data ");
 		// allocate result matrix on device for cublas computation
 		mat<T> C(M, B.N, memLocation::DEVICE);
 
@@ -267,30 +279,35 @@ public:
 
 	// copy host to device - from B to matrix m
 	mat<T>& operator<<=(const mat<T>& B) {
+		emptyAllocation(&data, B.M, B.N, B.memState, empty, &M, &N);
 		copyHostToDevice(B.data, data, M, N);
 		return *this;
 	}
 
 	// copy device to host - from B to matrix m
 	mat<T>& operator>>=(const mat<T>& B) {
-		copyDeviceToHost(B.data, data, M, N);;
+		emptyAllocation(&data, B.M, B.N, B.memState, empty, &M, &N);
+		copyDeviceToHost(B.data, data, M, N);
 		return *this;
 	}
 
 	// copy host to host - from B to matrix m
 	mat<T>& operator<=(const mat<T>& B) {
+		emptyAllocation(&data, B.M, B.N, B.memState, empty, &M, &N);
 		copyHostToHost(B.data, data, M, N);
 		return *this;
 	}
 
 	// copy device to device - from B to matrix m
 	mat<T>& operator>=(const mat<T>& B) {
+		emptyAllocation(&data, B.M, B.N, B.memState, empty, &M, &N);
 		copyDeviceToDevice(B.data, data, M, N);
 		return *this;
 	}
 
 	// dynamic copying
 	mat<T>& operator=(const mat<T>& B) {
+		emptyAllocation(&data, B.M, B.N, B.memState, empty, &M, &N);
 		dynamicCopy(data, B.data, M, N, memState, B.memState);
 		return *this;
 	}
@@ -298,17 +315,21 @@ public:
 	// check if transfer to device is needed
 	bool checkToAllocateOnDevice(const T* h_m, T** d_m, int n_rows, int n_cols, memLocation memLoc);
 
-private:
-
 	// decide compute and data types for matrix m - m_T matrix data type, c_T - compute type
 	cudaDataType m_T();
 
+	// special matrix functions
+	// transpose - using tiled transpose kernel
+	void transpose();
+
+private:
 	// memory and device management ( + overloads)
 	// ver. 1 - no const
 
 	// allocation
 	void allocateOnHost(T** h_m, int n_rows, int n_cols, memLocation memLoc);
 	void allocateOnDevice(T** d_m, int n_rows, int n_cols);
+	void emptyAllocation(T** m, int n_rows, int n_cols, memLocation memLoc, bool empty_mat, int* r, int* c);
 
 	// copy
 	void copyHostToDevice(T* h_m, T* d_m, int n_rows, int n_cols);
@@ -389,6 +410,15 @@ void mat<T>::allocateOnHost(T** h_m, int n_rows, int n_cols, memLocation memLoc)
 template<typename T>
 void mat<T>::allocateOnDevice(T** d_m, int n_rows, int n_cols) {
 	checkCudaErrors(cudaMalloc((void**)d_m, n_rows * n_cols * sizeof(T)));
+}
+
+template<typename T>
+void mat<T>::emptyAllocation(T** m, int n_rows, int n_cols, memLocation memLoc, bool empty_mat, int* r, int* c) {
+	if (empty_mat) {
+		*r = n_rows;
+		*c = n_cols;
+		(HOST_ALLOC(memLoc)) ? allocateOnHost(m, n_rows, n_rows, memLoc) : allocateOnDevice(m, n_rows, n_rows);
+	}
 }
 
 template<typename T>
@@ -681,6 +711,69 @@ void mat<T>::destroyDeviceMatrix(T** d_m) {
 	checkCudaErrors(cudaFree(*d_m));
 }
 
+// calculating matrix transpose using shared memory and a tiled algorithm
+/*
+the idea is to minimize the time of jumps in device memory (it is much slower in GPU than CPU)
+through jumping between close neighberhoods of data items in memory ONLY. 
+optimizations:
+1) shared memory - the transpose operation requires many threads to read from the same matrix,
+   and to write to the same output result, therefore using shared memory (duplicating the same memory 
+   for each thread) results in much faster read/write operations.
+
+2) tile divition of a matrix - divide the matrix into tiles of kxk (for A(NxN), N | k), performe the
+   transpose of each tile and copy the transposed tiles to the output matrix. this methods minimizes
+   long jumps in physical memory when used with shared memory.
+*/
+// execution in blocks of [BLOCK_ROWS, TILE_DIM]
+template<typename T>
+__global__ void tiledTranspose(T* idata, T* odata, int TILE_DIM, int BLOCK_ROWS) {
+	// running two dimensions - block dimension is TILE_DIM
+	int x = TILE_DIM * blockIdx.x + threadIdx.x;
+	int y = TILE_DIM * blockIdx.y + threadIdx.y;
+	int height = gridDim.y * TILE_DIM;
+
+	// allocating tile in shared memory
+	__shared__ T tile[TILE_DIM][TILE_DIM];
+
+	// copying idata to tile
+	for (int j = 0; j < TILE_DIM; j += BLOCK_ROWS) {
+		tile[threadIdx.y][threadIdx.x + j] = idata[(x + j) * height + y];
+	}
+
+	__syncthreads();
+
+	// flip indices
+	x = TILE_DIM * blockIdx.y + threadIdx.x;
+	y = TILE_DIM * blockIdx.x + threadIdx.y;
+
+	// copy tile data to odata in flipped order
+	for (int j = 0; j < TILE_DIM; j += BLOCK_ROWS) {
+		odata[(x + j) * height + y] = tile[threadIdx.x + j][threadIdx.y];
+	}
+}
+
+template<typename T>
+void mat<T>::transpose() {
+	// check if data is in device memory
+	T* idata; T* odata;
+	bool i_st = checkToAllocateOnDevice(data, &idata, M, N, memState);
+	checkCudaErrors(cudaMalloc((void**)&odata, N * M * sizeof(T)));
+
+	// compute transpose kernel
+	dim3 threadsPerBlock(16, 16);
+	dim3 numBlocks((N + threadsPerBlock.x - 1) / threadsPerBlock.x, (N + threadsPerBlock.y - 1) / threadsPerBlock.y);
+	tiledTranspose<T> <<<numBlocks,threadsPerBlock>>> ((i_st) ? idata : data,
+													   odata, 32, 8);
+
+	// copy memory to host
+	int new_dim_x = N; 
+	int new_dim_y = M;
+	M = new_dim_x; N = new_dim_y;
+	checkCudaErrors(cudaMemcpy(data, odata, N * M * sizeof(T), cudaMemcpyDeviceToHost));
+	// free memory
+	if (i_st)checkCudaErrors(cudaFree(idata));
+	checkCudaErrors(cudaFree(odata));
+}
 
 /*
 ---------------------------------------------------------------------------------------------------
@@ -1384,13 +1477,11 @@ void Sparse_mat<T>::structuredDenseMatMul_op(int64_t b_rows, int64_t b_cols,
 	// create stream
 	cudaStream_t stream;
 	checkCudaErrors(cudaStreamCreate(&stream));
-	printf_s("\n starting compressing A\n");
 	// prune and compress matrix A (the sparse matrix)
 	T* d_A_cmprs;
 	cusparseLtSparseMatPrune_Compress(pHandle, pMatmulDescr, pPlan, (const T*)data, M * N, memState, (void**)&d_A_cmprs, stream);
 
 	// search for optimal algorithm and execute operation
-	printf_s("\n multiplying\n");
 	structuredDenseMatMul((const cusparseLtHandle_t*)pHandle,
 						  pPlan,
 						  (int)(M * N), 
@@ -1887,11 +1978,479 @@ Sparse_mat<T>& Sparse_mat<T>::operator*=(const Sparse_mat<T>& B) {
 
 /*
 ---------------------------------------------------------------------------------------------------
+--------------------------------------------VECTOR CLASS-------------------------------------------
+---------------------------------------------------------------------------------------------------
+*/
+
+// probably vectors are more dense than matrices 
+// vector class supports dense vectors only.
+template<typename T>
+class vector : public mat<T> {
+public:
+	// inherit constructors
+	using mat<T>::mat;
+	
+	// dense vector descriptor for sparse matrix - dense vector operations
+	cusparseDnVecDescr_t dnVecDescr;
+
+	// assignment operators - vector to vector
+	vector<T> operator+(const vector<T>& v);
+	vector<T>& operator+=(const vector<T>& v);
+	// vec1(1xM)*vec2(Mx1)
+	T operator*(const vector<T>& v);
+	// vec1(Mx1)*vec2(1xM)
+	mat<T> operator^(const vector<T>& v);
+
+	// assignment operators - matrix to vector
+	friend vector<T> operator%(const Sparse_mat<T>& M, vector<T>& v) {
+		return v.sparseMatDenseVecMul(M, v);
+	}
+	friend vector<T> operator%(const mat<T>& M, const vector<T>& v) {
+		return denseMatDenseVecMul(M, v);
+	}
+
+	// compute sparse-dense multiplication
+	vector<T> sparseMatDenseVecMul(const Sparse_mat<T>& M, vector<T>& v);
+
+	// create and destroy dense vector descriptor
+	void createDense(T* values);
+	void destroyDense();
+
+private:
+	void checkVectorValidity(int n, int m);
+
+	// vector addition kernel
+	void vector_addition(T* v1, T* v2, T* res, int N, memLocation v1Loc, memLocation v2Loc);
+	// vector dot kernel
+	void vector_dot(T* v1, T* v2, T* res, int N, memLocation v1Loc, memLocation v2Loc);
+	// vector multiplication -> matrix output kernel
+	void vector_mult(T* v1, T* v2, T* res, int ld1, int ld2, memLocation v1Loc, memLocation v2Loc);
+	/*
+	---------------- cusparse operation Y = alpha*op(A)*X + beta*Y ----------------
+	*/
+	// estimate buffer size needed for sparse matrix - dense vector multiplication
+	void estimateBufferSize(cusparseHandle_t handle,
+							const void* alpha,
+							cusparseSpMatDescr_t matA,
+							cusparseDnVecDescr_t vecX,
+							const void* beta,
+							cusparseDnVecDescr_t vecY,
+							size_t* bufferSize);
+
+	// compute spaese matrix - dense vector multiplication
+	void spMv_compute(cusparseHandle_t handle,
+					  const void* alpha,
+					  cusparseSpMatDescr_t matA,
+					  cusparseDnVecDescr_t vecX,
+					  const void* beta,
+					  cusparseDnVecDescr_t vecY,
+					  void* externalBuffer);
+
+	// create compute pipeline and calculate multiplication result
+	void spMv(cusparseHandle_t handle,
+			  cusparseSpMatDescr_t matA,
+			  cusparseDnVecDescr_t vecX,
+			  cusparseDnVecDescr_t vecY);
+};
+
+// implementations
+
+// create dense vector descriptor for cusparse
+template<typename T>
+void vector<T>::createDense(T* values) {
+	checkCuSparseErrors(cusparseCreateDnVec(&dnVecDescr, M, (void*)values, m_T()));
+}
+
+// destory dense cusparse descriptor
+template<typename T>
+void vector<T>::destroyDense() {
+	checkCuSparseErrors(cusparseDestroyDnVec(dnVecDescr));
+}
+
+// check if the number of columns is 1. if not -> throw invalid argument
+template<typename T>
+void vector<T>::checkVectorValidity(int m, int n) {
+	if (m <= 1 || n != 1)throw std::invalid_argument("input dimensions do not represent a vector");
+}
+
+/*
+---                                                                                               ---
+----------------------------- cuda c - basic vector - vector operations -----------------------------
+---																				            	  ---
+*/
+
+// vector addition kernel
+template<typename T>
+__global__ void vecAdd(T* v1, T* v2, T* res, int N) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	if (i < N) {
+		res[i] = v1[i] + v2[i];
+	}
+}
+
+// vector addition function to invoke the kernel
+template<typename T>
+void vector<T>::vector_addition(T* v1, T* v2, T* res, int N, memLocation v1Loc, memLocation v2Loc) {
+	// check if inputs are allocated in device 
+	T* d_v1; T* d_v2; 
+	bool v1_st = checkToAllocateOnDevice(v1, &d_v1, N, 1, v1Loc);
+	bool v2_st = checkToAllocateOnDevice(v2, &d_v2, N, 1, v2Loc);
+
+	// do the calculation
+	int threadsPerBlock = 256;
+	int blocksPerGrid = (N + threadsPerBlock - 1) / threadsPerBlock;
+	vecAdd <<<blocksPerGrid, threadsPerBlock>>> ((v1_st) ? d_v1 : v1,
+												 (v2_st) ? d_v2 : v2,
+												 res, N);
+
+	// free memory
+	if (v1_st)checkCudaErrors(cudaFree(d_v1));
+	if (v2_st)checkCudaErrors(cudaFree(d_v2));
+}
+
+// addition operator
+template<typename T>
+vector<T> vector<T>::operator+(const vector<T>& v) {
+	checkVectorValidity(v.M, v.N); checkVectorValidity(M, N);
+	if (v.M != M)throw std::length_error("vector sizes do not match");
+
+	// addition kernel
+	vector<T> res(M, 1, memLocation::DEVICE);
+	vector_addition(data, v.data, res.data, M, memState, v.memState);
+
+	return res;
+}
+
+template<typename T>
+vector<T>& vector<T>::operator+=(const vector<T>& v) {
+	checkVectorValidity(v.M, v.N); checkVectorValidity(M, N);
+	if (v.M != M)throw std::length_error("vector sizes do not match");
+
+	// addition kernel
+	vector_addition(data, v.data, data, M, memState, v.memState);
+	return *this;
+}
+
+// basic dot product kernel
+template<typename T>
+__global__ void dotKernel(T* v1, T* v2, T* res, int N) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	if (i < N) {
+		*res += v1[i] * v2[i];
+	}
+}
+
+// dot function
+template<typename T>
+void vector<T>::vector_dot(T* v1, T* v2, T* res, int N, memLocation v1Loc, memLocation v2Loc) {
+	// check if inputs are allocated in device 
+	T* d_v1; T* d_v2; T* d_res;
+	bool v1_st = checkToAllocateOnDevice(v1, &d_v1, N, 1, v1Loc);
+	bool v2_st = checkToAllocateOnDevice(v2, &d_v2, N, 1, v2Loc);
+	
+	// assuming res is in host memory (to return to main program)
+	checkCudaErrors(cudaMalloc((void**)&d_res, sizeof(T)));
+
+	// calculate dot product
+	int threadsPerBlock = 256;
+	int blocksPerGrid = (N + threadsPerBlock - 1) / threadsPerBlock;
+	dotKernel<T><<<blocksPerGrid, threadsPerBlock>>> ((v1_st) ? d_v1 : v1,
+													  (v2_st) ? d_v2 : v2,
+													  d_res, N);
+
+	// copy the result to host 
+	checkCudaErrors(cudaMemcpy(res, d_res, sizeof(T), cudaMemcpyDeviceToHost));
+
+	// free memory
+	checkCudaErrors(cudaFree(d_res));
+	if (v1_st)checkCudaErrors(cudaFree(d_v1));
+	if (v2_st)checkCudaErrors(cudaFree(d_v2));
+}
+
+// dot product
+template<typename T>
+T vector<T>::operator*(const vector<T>& v) {
+	checkVectorValidity(v.M, v.N); checkVectorValidity(M, N);
+	if (v.M != M)throw std::length_error("vector sizes do not match");
+
+	T res = static_cast<T>(0);
+	vector_dot(data, v.data, &res, M, memState, v.memState);
+	return res;
+}
+
+// vector multiplication kernel
+template<typename T>
+__global__ void vecMul(T* v1, T* v2, T* out, int ld1, int ld2) {
+	int x = blockDim.x * blockIdx.x + threadIdx.x;
+	int y = blockDim.y * blockIdx.y + threadIdx.y;
+
+	if (x < ld1 && y < ld2) {
+		out[ld1 * y + x] = v1[x] * v2[y];
+	}
+}
+
+// computes v1(mx1)*v2(1xn) = M(mxn)
+template<typename T>
+void vector<T>::vector_mult(T* v1, T* v2, T* res, int ld1, int ld2, memLocation v1Loc, memLocation v2Loc) {
+	// check if inputs are allocated in device 
+	T* d_v1; T* d_v2;
+	bool v1_st = checkToAllocateOnDevice(v1, &d_v1, ld1, 1, v1Loc);
+	bool v2_st = checkToAllocateOnDevice(v2, &d_v2, ld2, 1, v2Loc);
+
+	// calculate matrix result - two dimensional blocks + threads
+	dim3 threadsPerBlock(16, 16);
+	dim3 numBlocks((N + threadsPerBlock.x - 1) / threadsPerBlock.x, (N + threadsPerBlock.y - 1) / threadsPerBlock.y);
+	vecMul<T> <<<numBlocks, threadsPerBlock>>> ((v1_st) ? d_v1 : v1,
+												(v2_st) ? d_v2 : v2,
+												res, ld1, ld2);
+
+	// free memory
+	if (v1_st)checkCudaErrors(cudaFree(d_v1));
+	if (v2_st)checkCudaErrors(cudaFree(d_v2));
+}
+
+// matrix product
+template<typename T>
+mat<T> vector<T>::operator^(const vector<T>& v) {
+	checkVectorValidity(v.M, v.N); checkVectorValidity(M, N);
+	if (v.M != M)throw std::length_error("vector sizes do not match");
+
+	// calculate v1*v2^T = M
+	mat<T> resMat(M, v.M, memLocation::DEVICE);
+	vector_mult(data, v.data, resMat.data, M, v.M, memState, v.memState);
+	return resMat;
+}
+
+
+/*
+---                                                                                               ---
+------------------------- cublas dense matrix - dense vector multiplication -------------------------
+---																				            	  ---
+*/
+
+// overloads for matrix-vector multiplications
+void cublasGemV(cublasHandle_t handle,
+				int m, int n,
+				const float* alpha,
+				const float* A, int lda,
+				const float* x, int incx,
+				const float* beta,
+				float* y, int incy) {
+
+	checkCuBLAS_status(cublasSgemv_v2(handle, CUBLAS_OP_N, m, n, alpha, A, lda, x, incx, beta, y, incy));
+}
+
+void cublasGemV(cublasHandle_t handle,
+				int m, int n,
+				const double* alpha,
+				const double* A, int lda,
+				const double* x, int incx,
+				const double* beta,
+				double* y, int incy) {
+
+	checkCuBLAS_status(cublasDgemv_v2(handle, CUBLAS_OP_N, m, n, alpha, A, lda, x, incx, beta, y, incy));
+}
+
+void cublasGemV(cublasHandle_t handle,
+				int m, int n,
+				const cuComplex* alpha,
+				const cuComplex* A, int lda,
+				const cuComplex* x, int incx,
+				const cuComplex* beta,
+				cuComplex* y, int incy) {
+
+	checkCuBLAS_status(cublasCgemv_v2(handle, CUBLAS_OP_N, m, n, alpha, A, lda, x, incx, beta, y, incy));
+}
+
+void cublasGemV(cublasHandle_t handle,
+				int m, int n,
+				const cuDoubleComplex* alpha,
+				const cuDoubleComplex* A, int lda,
+				const cuDoubleComplex* x, int incx,
+				const cuDoubleComplex* beta,
+				cuDoubleComplex* y, int incy) {
+
+	checkCuBLAS_status(cublasZgemv_v2(handle, CUBLAS_OP_N, m, n, alpha, A, lda, x, incx, beta, y, incy));
+}
+
+// wrapper for general type gemv
+template<typename T>
+void GemvWrapper(cublasHandle_t handle,
+				 int m, int n,
+				 const T* A, int lda,
+				 const T* x, T** y) {
+
+	// set alpha, beta
+	const T alpha = static_cast<T>(1);
+	const T beta = static_cast<T>(0);
+
+	cublasGemV(handle, m, n, &alpha, A, lda, x, 1, &beta, *y, 1);
+}
+
+// the following functions calculates dense matrix-dense vector multiplication
+// and returns the resulting data in vector form. the returned vector is not dense descriptor initiated!
+template<typename T>
+vector<T> denseMatDenseVecMul(const mat<T>& M, const vector<T>& v) {
+	// create vector Y
+	vector<T> u(M.M, v.N, memLocation::DEVICE);
+
+	// create handle
+	cublasHandle_t handle;
+	checkCuBLAS_status(cublasCreate_v2(&handle));
+
+	// compute
+	GemvWrapper(handle, M.M, M.N, M.data, M.M, v.data, &u.data);
+
+	// free memory
+	checkCuBLAS_status(cublasDestroy_v2(handle));
+	return u;
+}
+
+/*
+---                                                                                               ---
+----------------------- cusparse sparse matrix - dense vector multiplication ------------------------
+---																				            	  ---
+*/
+
+template<typename T>
+void vector<T>::estimateBufferSize(cusparseHandle_t handle,
+								   const void* alpha,
+								   cusparseSpMatDescr_t matA,
+								   cusparseDnVecDescr_t vecX,
+								   const void* beta,
+								   cusparseDnVecDescr_t vecY,
+								   size_t* bufferSize) {
+	
+	// get buffer size needed for computation
+	checkCuSparseErrors(cusparseSpMV_bufferSize(handle,
+												CUSPARSE_OPERATION_NON_TRANSPOSE,
+												alpha,
+												matA, vecX,
+												beta,
+												vecY, 
+												m_T(), 
+												CUSPARSE_SPMV_CSR_ALG1,
+												bufferSize));
+}
+
+// compute the multiplication result of a sparse matrix M and dense vector v
+template<typename T>
+void vector<T>::spMv_compute(cusparseHandle_t handle,
+							 const void* alpha,
+							 cusparseSpMatDescr_t matA,
+							 cusparseDnVecDescr_t vecX,
+							 const void* beta,
+							 cusparseDnVecDescr_t vecY,
+							 void* externalBuffer) {
+
+	// compute with external buffer - allocated in wrapper function
+	checkCuSparseErrors(cusparseSpMV(handle,
+									 CUSPARSE_OPERATION_NON_TRANSPOSE,
+									 alpha,
+									 matA, vecX,
+									 beta,
+									 vecY,
+									 m_T(), 
+									 CUSPARSE_SPMV_CSR_ALG1,
+									 externalBuffer));
+}
+
+// put all multiplication pipeline together for the full computation
+template<typename T>
+void vector<T>::spMv(cusparseHandle_t handle,
+					 cusparseSpMatDescr_t matA,
+					 cusparseDnVecDescr_t vecX,
+					 cusparseDnVecDescr_t vecY) {
+
+	// set alpha and beta
+	const T alpha = static_cast<T>(1);
+	const T beta = static_cast<T>(0);
+
+	// compute
+	size_t bufferSize; void* externalBuffer;
+	estimateBufferSize(handle,
+					   (const void*)&alpha,
+					   matA, vecX,
+					   (const void*)&beta,
+					   vecY,
+					   &bufferSize);
+
+	checkCudaErrors(cudaMalloc(&externalBuffer, bufferSize));
+
+	spMv_compute(handle,
+				 (const void*)&alpha,
+				 matA, vecX,
+				 (const void*)&beta,
+				 vecY,
+				 externalBuffer);
+
+	// free memory
+	checkCudaErrors(cudaFree(externalBuffer));
+}
+
+// wrapper function for executing sparse matrix - dense vector multiplication. used for * operator
+// assumption - matrix M is CSR ready with an existing spMatDescr
+template<typename T>
+vector<T> vector<T>::sparseMatDenseVecMul(const Sparse_mat<T>& M, vector<T>& v) {
+	// check if vector data is in device
+	T* d_vector;
+	bool vec_st = checkToAllocateOnDevice(v.data, &d_vector, v.M, v.N, v.memState);
+	// create descriptors
+	v.createDense((vec_st) ? d_vector : v.data); // remember to free
+	
+	// create cusparse handle
+	cusparseHandle_t handle;
+	checkCuSparseErrors(cusparseCreate(&handle));
+
+	// compute - the dense vector descriptor is destroyed due to it not being copied to the output.
+	vector<T> u(M.M, v.N, memLocation::DEVICE); u.createDense(u.data); // remember to free
+	spMv(handle, M.SpMatDescr, v.dnVecDescr, u.dnVecDescr); 
+
+	// free memory
+	checkCudaErrors(cudaFree(d_vector));
+	checkCuSparseErrors(cusparseDestroy(handle));
+	return u;
+}
+
+/*
+---------------------------------------------------------------------------------------------------
 ---------------------------------------LINEAR EQUATION SOLVER--------------------------------------
 ---------------------------------------------------------------------------------------------------
 */
 
-template<typename T>
-class nDvector {
 
+/*
+
+template<typename T>
+class LinearSolver {
+public:
+
+	// types
+	DECOMP _fact;
+	bool _sparse;
+
+	// inputs 
+	mat<T> D_A;
+	Sparse_mat<T> S_A;
+	vector<T> b;
+
+	// output
+	vector<T> x;
+
+	LinearSolver(DECOMP _FACT, bool sparse) {
+		_fact = _FACT;
+		_sparse = sparse;
+	}
+
+	// define inputs
+	void I_matrix(mat<T>& A);
+	void I_matrix(Sparse_mat<T>& A);
+	void I_vector(vector<T>& v);
+	
+	// define solver function
+	void Solve();
+
+	// output result
+	vector<T> O_vector();
 };
+*/
