@@ -62,7 +62,8 @@ __global__ void printArr_df32(float* P, int l) {
 #define HOST_ALLOC(memLoc)((memLoc) == memLocation::HOST_PINNED || (memLoc) == memLocation::HOST)
 #define DEVICE_ALLOC(memLoc)((memLoc) == memLocation::DEVICE)
 
-
+#define TILE_DIM 8
+#define BLOCK_ROWS 8
 // general error definition
 
 inline void cublasAssert(cublasStatus_t code, const char* file, int line, bool abort = true)
@@ -726,18 +727,18 @@ optimizations:
 */
 // execution in blocks of [BLOCK_ROWS, TILE_DIM]
 template<typename T>
-__global__ void tiledTranspose(T* idata, T* odata, int TILE_DIM, int BLOCK_ROWS) {
+__global__ void tiledTranspose(T* idata, T* odata) {
 	// running two dimensions - block dimension is TILE_DIM
 	int x = TILE_DIM * blockIdx.x + threadIdx.x;
-	int y = TILE_DIM * blockIdx.y + threadIdx.y;
+	int y = BLOCK_ROWS * blockIdx.y + threadIdx.y;
 	int height = gridDim.y * TILE_DIM;
 
-	// allocating tile in shared memory
-	__shared__ T tile[TILE_DIM][TILE_DIM];
+	// allocating tile in shared memory - preventing bank conflicts
+	__shared__ T tile[TILE_DIM][TILE_DIM + 1];
 
 	// copying idata to tile
 	for (int j = 0; j < TILE_DIM; j += BLOCK_ROWS) {
-		tile[threadIdx.y][threadIdx.x + j] = idata[(x + j) * height + y];
+		tile[threadIdx.y + j][threadIdx.x] = idata[x * height + y + j];
 	}
 
 	__syncthreads();
@@ -748,22 +749,24 @@ __global__ void tiledTranspose(T* idata, T* odata, int TILE_DIM, int BLOCK_ROWS)
 
 	// copy tile data to odata in flipped order
 	for (int j = 0; j < TILE_DIM; j += BLOCK_ROWS) {
-		odata[(x + j) * height + y] = tile[threadIdx.x + j][threadIdx.y];
+		odata[x * height + y + j] = tile[threadIdx.x][threadIdx.y + j];
 	}
 }
 
 template<typename T>
 void mat<T>::transpose() {
 	// check if data is in device memory
-	T* idata; T* odata;
+	T* idata; T* odata; 
 	bool i_st = checkToAllocateOnDevice(data, &idata, M, N, memState);
 	checkCudaErrors(cudaMalloc((void**)&odata, N * M * sizeof(T)));
 
+	// check for fitting dimensions
+	if (N % TILE_DIM || M % BLOCK_ROWS) throw std::invalid_argument("tile dimensions have to divide matrix dimensions");
+
 	// compute transpose kernel
-	dim3 threadsPerBlock(16, 16);
-	dim3 numBlocks((N + threadsPerBlock.x - 1) / threadsPerBlock.x, (N + threadsPerBlock.y - 1) / threadsPerBlock.y);
-	tiledTranspose<T> <<<numBlocks,threadsPerBlock>>> ((i_st) ? idata : data,
-													   odata, 32, 8);
+	dim3 threadsPerBlock(TILE_DIM, BLOCK_ROWS);
+	dim3 numBlocks((N + threadsPerBlock.x - 1) / threadsPerBlock.x, (M + threadsPerBlock.y - 1) / threadsPerBlock.y);
+	tiledTranspose<T> <<<numBlocks,threadsPerBlock>>> ((i_st) ? idata : data, odata);
 
 	// copy memory to host
 	int new_dim_x = N; 
@@ -2199,7 +2202,7 @@ void vector<T>::vector_mult(T* v1, T* v2, T* res, int ld1, int ld2, memLocation 
 
 	// calculate matrix result - two dimensional blocks + threads
 	dim3 threadsPerBlock(16, 16);
-	dim3 numBlocks((N + threadsPerBlock.x - 1) / threadsPerBlock.x, (N + threadsPerBlock.y - 1) / threadsPerBlock.y);
+	dim3 numBlocks((N + threadsPerBlock.x - 1) / threadsPerBlock.x, (M + threadsPerBlock.y - 1) / threadsPerBlock.y);
 	vecMul<T> <<<numBlocks, threadsPerBlock>>> ((v1_st) ? d_v1 : v1,
 												(v2_st) ? d_v2 : v2,
 												res, ld1, ld2);
@@ -2418,9 +2421,6 @@ vector<T> vector<T>::sparseMatDenseVecMul(const Sparse_mat<T>& M, vector<T>& v) 
 ---------------------------------------------------------------------------------------------------
 */
 
-
-/*
-
 template<typename T>
 class LinearSolver {
 public:
@@ -2446,11 +2446,28 @@ public:
 	void I_matrix(mat<T>& A);
 	void I_matrix(Sparse_mat<T>& A);
 	void I_vector(vector<T>& v);
-	
+
 	// define solver function
 	void Solve();
 
 	// output result
 	vector<T> O_vector();
 };
-*/
+
+// copy matrix data to new matrix
+template<typename T>
+void LinearSolver<T>::I_matrix(mat<T>& A) {
+	D_A = A; D_A.empty = false;
+}
+
+// copy sparse matrix data to a new matrix
+template<typename T>
+void LinearSolver<T>::I_matrix(Sparse_mat<T>& A) {
+
+}
+
+// copy vector data into class vector
+template<typename T>
+void LinearSolver<T>::I_vector(vector<T>& v) {
+
+}
