@@ -121,6 +121,33 @@ void cudaFreeMem(args*... rawPts) {
 }
 
 /*
+generic asynchronous gpu<->cpu copying function
+takes general amount of output pointers and input pointers, array of transmition types for cudaMemcpyAsync
+*/
+template<typename... args, typename... sizes>
+void asyncMemCopy(args*... idataPtrs, sizes... dataSizes, args*... odataPtrs, std::vector<cudaMemcpyKind> kinds) {
+	// get inputs
+	auto size_vec = { dataSizes... };
+	auto idata_vec = { idataPtrs... };
+	auto odata_vec = { odataPtrs... };
+	// create stream array
+	cudaStream_t* stream = (cudaStream_t*)malloc(odata_vec.size() * sizeof(args));
+	//TODO: USE BOOST TO ZIP ALL THREE GOD DAMNIT!!!
+	for (int i = 0; i < odata_vec.size(); i++) {
+		checkCudaErrors(cudaStreamCreate(&stream[i]));
+		checkCudaErrors(cudaMemcpyAsync(odata_vec[i], idata_vec[i], size_vec[i], kinds[i], stream[i]));
+	}
+	checkCudaErrors(cudaDeviceSynchronize());
+
+	// destroy stream array
+	for (auto pStream = stream; pStream != stream + odata_vec.size(); ++pStream) {
+		checkCudaErrors(cudaStreamDestroy(*pStream));
+	}
+	free(stream);
+}
+
+
+/*
 ---------------------------------------------------------------------------------------------------
 -------------------------------------------MATRIX CLASS--------------------------------------------
 ---------------------------------------------------------------------------------------------------
@@ -798,6 +825,9 @@ public:
 	int32_t* csrColInd; // size nnz x 1 - column indices of nz elements
 	T* csrValues; // size nnz x 1 - values of all nz elements
 
+	// flag for detecting creation of CSR format
+	bool CSR_enabled = false;
+
 	// needed for creating csr formatting and for sparse - sparse operations
 	cusparseSpMatDescr_t SpMatDescr;
 
@@ -1068,8 +1098,8 @@ private:
 // used when a matrix has known dimensions and values, for sparse-sparse cuSPARSE api operations only
 template<typename T>
 void Sparse_mat<T>::createCSR() {
-	// create handle
-	cusparseHandle_t handle;
+	// create handle, updating flag
+	cusparseHandle_t handle; CSR_enabled = true;
 	checkCuSparseErrors(cusparseCreate(&handle));
 	// allocate memory for the three arrays and convert from a dense representation
 	// to a CSR sparse matrix representation
@@ -1090,6 +1120,7 @@ void Sparse_mat<T>::createCSR() {
 // destroy CSR format sparse matrix handle and free all csr arrays
 template<typename T>
 void Sparse_mat<T>::destroyCSR() {
+	CSR_enabled = false;
 	cudaFreeMem((void*)csrRowOffsets, (void*)csrColInd, (void*)csrValues);
 	checkCuSparseErrors(cusparseDestroySpMat(SpMatDescr));
 }
@@ -2457,13 +2488,40 @@ public:
 // copy matrix data to new matrix
 template<typename T>
 void LinearSolver<T>::I_matrix(mat<T>& A) {
+	if (_sparse)printf("\nsparse representation initialized - general matrix implementation is less efficient\n");
 	D_A = A; D_A.empty = false;
 }
 
 // copy sparse matrix data to a new matrix
 template<typename T>
 void LinearSolver<T>::I_matrix(Sparse_mat<T>& A) {
+	if (!A.CSR_enabled) {
+		S_A.data = A.data; 
+		S_A.empty = false;
+	}
+	else {
+		// get sizes - nnz = A.csrRowOffsets[M] - A.csrRowOffsets[0]
+		int32_t rows; int32_t cols; int32_t nnz;
+		checkCuSparseErrors(cusparseSpMatGetSize(A.SpMatDescr, &rows, &cols, &nnz));
 
+		// allocate memory and copy CSR data to S_A
+		checkCudaErrors(cudaMalloc((void**)&S_A.csrRowOffsets, (rows + 1) * sizeof(int32_t)));
+		checkCudaErrors(cudaMalloc((void**)&S_A.csrColInd, nnz * sizeof(int32_t)));
+		checkCudaErrors(cudaMalloc((void**)&S_A.csrValues, nnz * sizeof(T)));
+
+		// copy data to S_A - asyncMemcpy needs to be fixed
+		asyncMemCopy(S_A.csrRowOffsets, S_A.csrColInd, S_A.csrColInd,
+					 (rows + 1) * sizeof(int32_t), nnz * sizeof(int32_t), nnz * sizeof(T),
+					 A.csrRowOffsets, A.csrColInd, A.csrValues,
+			         { cudaMemcpyDeviceToDevice , cudaMemcpyDeviceToDevice , cudaMemcpyDeviceToDevice });
+
+		// create new sparse matrix descriptor for S_A
+		S_A.createCsrSparse(S_A.SpMatDescr,
+							rows, cols, nnz, 
+						    (void**)&S_A.csrRowOffsets,
+							(void**)&S_A.csrColInd,
+							(void**)&S_A.csrColInd);
+	}
 }
 
 // copy vector data into class vector
@@ -2471,3 +2529,7 @@ template<typename T>
 void LinearSolver<T>::I_vector(vector<T>& v) {
 
 }
+
+/*
+----------------- solver utility functions for cuSOLVER api -----------------
+*/
