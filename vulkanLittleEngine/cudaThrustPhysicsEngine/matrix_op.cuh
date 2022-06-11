@@ -2484,7 +2484,10 @@ public:
 	// types
 	DECOMP _fact;
 	bool _sparse;
-
+	// for detecting whether b is not empty and recently
+	// scanned an input. used for dense solver to determine
+	// when to copy from b to solution. 
+	bool vector_inserted = false;
 	// inputs 
 	mat<T> D_A;
 	Sparse_mat<T> S_A;
@@ -2504,7 +2507,7 @@ public:
 	void I_vector(vector<T>& v);
 
 	// define solver function
-	void Solve();
+	vector<T> Solve();
 
 	// output result
 	vector<T> O_vector();
@@ -2513,7 +2516,7 @@ private:
 	// extract sparse matrix data to solve sparse linear equaitions of
 	// the form Ax = b
 	/*
-	the general solver chooses from four different methods for solving the linear equation:
+	the general solver chooses from three different methods for solving the linear equation:
 	1) LU - Ax = LUx = b => x = U^-1 * L^-1 * b,  L is lower triangular, U is upper triangular
 	2) QR - Ax = QRx = b => x = Q^T * R^-1 * b, Q is orthogonal, R is upper triangular
 	3) cholesky - Ax = LL^H * x = b => x = L^-1 * L^-H * b, L is a lower triangular matrix,
@@ -2526,9 +2529,9 @@ private:
 	1) LU - uses cusolver<t>getrf() to factorize A into LU, and cusolver<t>getrs() to solve
 	2) QR - uses cusolver<t>geqrf() to factorize into QR, cusolver<t>ormqr() to transpose Q and
 	   cublas<t>trsm() to solve for Rx = B, B = Q^T * b;
-	3) cholesky - not available. TODO : implement batched cholesky version
+	3) cholesky - not available. TODO : implement batched cholesky decomposition and solver
 	*/
-	void dnGENERALsolver(cusolverDnHandle_t handle, const cusparseMatDescr_t descrA);
+	void dnGENERALsolver(cusolverDnHandle_t cusolverHandle);
 };
 
 // copy matrix data to new matrix
@@ -2569,6 +2572,7 @@ void LinearSolver<T>::I_matrix(Sparse_mat<T>& A) {
 // copy vector data into class vector
 template<typename T>
 void LinearSolver<T>::I_vector(vector<T>& v) {
+	vector_inserted = true;
 	if (!v.dnDescrEnabled) {
 		b = v; b.empty = false;
 	}
@@ -2604,16 +2608,16 @@ void sparseLUsolver(cusolverSpHandle_t handle,
 					float *x,
 					int *singularity){
 
-	checkCuSolverErrors(cusolverSpScsrlsvlu(handle,
-										    n, nnzA,
-										    descrA,
-											csrValA,
-											csrRowPtrA,
-											csrColIndA,
-											b, tol,
-											reorder,
-											x,
-											singularity));
+	checkCuSolverErrors(cusolverSpScsrlsvluHost(handle,
+												n, nnzA,
+												descrA,
+												csrValA,
+												csrRowPtrA,
+												csrColIndA,
+												b, tol,
+												reorder,
+												x,
+												singularity));
 
 }
 
@@ -2631,16 +2635,16 @@ void sparseLUsolver(cusolverSpHandle_t handle,
 					double *x,
 					int *singularity){
 
-	checkCuSolverErrors(cusolverSpDcsrlsvlu(handle,
-										    n, nnzA,
-										    descrA,
-											csrValA,
-											csrRowPtrA,
-											csrColIndA,
-											b, tol,
-											reorder,
-											x,
-											singularity));
+	checkCuSolverErrors(cusolverSpDcsrlsvluHost(handle,
+												n, nnzA,
+												descrA,
+												csrValA,
+												csrRowPtrA,
+												csrColIndA,
+												b, tol,
+												reorder,
+												x,
+												singularity));
 
 }
 
@@ -2658,18 +2662,19 @@ void sparseLUsolver(cusolverSpHandle_t handle,
 					cuComplex *x,
 					int *singularity){
 
-	checkCuSolverErrors(cusolverSpCcsrlsvlu(handle,
-										    n, nnzA,
-										    descrA,
-											csrValA,
-											csrRowPtrA,
-											csrColIndA,
-											b, tol,
-											reorder,
-											x,
-											singularity));
+	checkCuSolverErrors(cusolverSpCcsrlsvluHost(handle,
+												n, nnzA,
+												descrA,
+												csrValA,
+												csrRowPtrA,
+												csrColIndA,
+												b, tol,
+												reorder,
+												x,
+												singularity));
 
 }
+
 
 // overload (4) - cuDoubleComplex data - [a,b], a double, b double <-> a + bi double complex
 void sparseLUsolver(cusolverSpHandle_t handle, 
@@ -2685,16 +2690,16 @@ void sparseLUsolver(cusolverSpHandle_t handle,
 					cuDoubleComplex *x,
 					int *singularity){
 
-	checkCuSolverErrors(cusolverSpZcsrlsvlu(handle,
-										    n, nnzA,
-										    descrA,
-											csrValA,
-											csrRowPtrA,
-											csrColIndA,
-											b, tol,
-											reorder,
-											x,
-											singularity));
+	checkCuSolverErrors(cusolverSpZcsrlsvluHost(handle,
+												n, nnzA,
+												descrA,
+												csrValA,
+												csrRowPtrA,
+												csrColIndA,
+												b, tol,
+												reorder,
+												x,
+												singularity));
 
 }
 
@@ -2957,12 +2962,27 @@ void LinearSolver<T>::spGENERALsolver(cusolverSpHandle_t handle, const cusparseM
 					     0, solution.data, 
 					     &singularity);
 	}
-	printf("\n U matrix singularity is : %d\n", singularity);
+	printf("\n U matrix singularity is : %d\n", singularity); 
 }
 
 /*
 -----dense LAPACK (like) api-----
 */
+
+// check for status of cusolver routins with the devInfo variable returned by 
+// cusolver routines (mostly for decomposition)
+void checkDevInfo(int* d_devInfo){
+	//! copying status to a host variable
+	int h_devInfo;
+	checkCudaErrors(cudaMemcpy(&h_devInfo, d_devInfo, sizeof(int), cudaMemcpyDeviceToHost));
+
+	//! checking
+	if(h_devInfo){
+		(h_devInfo < 0) ? printf("\ncuSOLVER routine have failed. wrong parameter is %d\n", -h_devInfo):
+						  printf("\ncuSOLVER routine have failed. U(%d,%d) = 0\n", h_devInfo);
+	}
+}
+
 /*
 ---------------------- SOLVING WITH LU DECOMPOSITION - Ax = b => x = U^-1 * L^-1 * b ----------------------
 */
@@ -2986,7 +3006,7 @@ void lu_decomposition(cusolverDnHandle_t handle,
 	float* workspace;
 	checkCudaErrors(cudaMalloc((void**)&workspace, Lwork * sizeof(float)));
 	// decompose
-	checkCuSolverErrors(cusolverDnSgetrf(handle, m, n, A, workspace, devIpiv, devInfo));
+	checkCuSolverErrors(cusolverDnSgetrf(handle, m, n, A, lda, workspace, devIpiv, devInfo));
 }
 
 // overload (2) - double
@@ -3004,7 +3024,7 @@ void lu_decomposition(cusolverDnHandle_t handle,
 	double* workspace;
 	checkCudaErrors(cudaMalloc((void**)&workspace, Lwork * sizeof(double)));
 	// decompose
-	checkCuSolverErrors(cusolverDnDgetrf(handle, m, n, A, workspace, devIpiv, devInfo));
+	checkCuSolverErrors(cusolverDnDgetrf(handle, m, n, A, lda, workspace, devIpiv, devInfo));
 }
 
 // overload (3) - cuComplex data - [a,b], a float, b float <-> a + bi float complex
@@ -3022,7 +3042,7 @@ void lu_decomposition(cusolverDnHandle_t handle,
 	cuComplex* workspace;
 	checkCudaErrors(cudaMalloc((void**)&workspace, Lwork * sizeof(cuComplex)));
 	// decompose
-	checkCuSolverErrors(cusolverDnCgetrf(handle, m, n, A, workspace, devIpiv, devInfo));
+	checkCuSolverErrors(cusolverDnCgetrf(handle, m, n, A, lda, workspace, devIpiv, devInfo));
 }
 
 // overload (4) - cuDoubleComplex data - [a,b], a double, b double <-> a + bi double complex
@@ -3040,7 +3060,7 @@ void lu_decomposition(cusolverDnHandle_t handle,
 	cuDoubleComplex* workspace;
 	checkCudaErrors(cudaMalloc((void**)&workspace, Lwork * sizeof(cuDoubleComplex)));
 	// decompose
-	checkCuSolverErrors(cusolverDnZgetrf(handle, m, n, A, workspace, devIpiv, devInfo));
+	checkCuSolverErrors(cusolverDnZgetrf(handle, m, n, A, lda, workspace, devIpiv, devInfo));
 }
 
 
@@ -3049,7 +3069,7 @@ void lu_decomposition(cusolverDnHandle_t handle,
 */
 
 // overload (1) - float
-void dense_lu_solver(usolverDnHandle_t handle,
+void dense_lu_solver(cusolverDnHandle_t handle,
 					 int n,
 					 float** A,
 					 int lda,
@@ -3058,20 +3078,19 @@ void dense_lu_solver(usolverDnHandle_t handle,
 					 int* devInfo){
 
 	// decompose and check status		
-	int* devIpiv; int devInfoLU;
-	lu_decomposition(handle, n, n, *A, lda, devIpiv, &devInfoLU);
-	if(!devInfoLU){
-		(devInfoLU < 0) ? printf("\nLU decomposition have failed. wrong parameter is %d\n", -devInfoLU):
-						  printf("\nLU decomposition have failed. U(%d,%d) = 0\n", devInfoLU);
-	}
-
+	int* devIpiv; int* devInfoLU; checkCudaErrors(cudaMalloc((void**)&devInfoLU, sizeof(int)));
+	checkCudaErrors(cudaMalloc((void**)&devIpiv, n * sizeof(int)));
+	lu_decomposition(handle, n, n, *A, lda, devIpiv, devInfoLU);
+	checkDevInfo(devInfoLU);
 	// solve equation
 	checkCuSolverErrors(cusolverDnSgetrs(handle, CUBLAS_OP_N, n, 1, (const float*)*A, lda,
 	                                     (const int*)devIpiv, B, ldb, devInfo));
+	// free memory
+	cudaFreeMem((void*)devIpiv, (void*)devInfoLU);
 }
 
 // overload (2) - double
-void dense_lu_solver(usolverDnHandle_t handle,
+void dense_lu_solver(cusolverDnHandle_t handle,
 					 int n,
 					 double** A,
 					 int lda,
@@ -3080,20 +3099,19 @@ void dense_lu_solver(usolverDnHandle_t handle,
 					 int* devInfo){
 
 	// decompose and check status		
-	int* devIpiv; int devInfoLU;
-	lu_decomposition(handle, n, n, *A, lda, devIpiv, &devInfoLU);
-	if(!devInfoLU){
-		(devInfoLU < 0) ? printf("\nLU decomposition have failed. wrong parameter is %d\n", -devInfoLU):
-						  printf("\nLU decomposition have failed. U(%d,%d) = 0\n", devInfoLU);
-	}
-
+	int* devIpiv; int* devInfoLU; checkCudaErrors(cudaMalloc((void**)&devInfoLU, sizeof(int)));
+	checkCudaErrors(cudaMalloc((void**)&devIpiv, n * sizeof(int)));
+	lu_decomposition(handle, n, n, *A, lda, devIpiv, devInfoLU);
+	checkDevInfo(devInfoLU);
 	// solve equation
 	checkCuSolverErrors(cusolverDnDgetrs(handle, CUBLAS_OP_N, n, 1, (const double*)*A, lda,
 	                                     (const int*)devIpiv, B, ldb, devInfo));
+	// free memory
+	cudaFreeMem((void*)devIpiv, (void*)devInfoLU);
 }
 
 // overload (3) - cuComplex data - [a,b], a float, b float <-> a + bi float complex
-void dense_lu_solver(usolverDnHandle_t handle,
+void dense_lu_solver(cusolverDnHandle_t handle,
 					 int n,
 					 cuComplex** A,
 					 int lda,
@@ -3102,20 +3120,19 @@ void dense_lu_solver(usolverDnHandle_t handle,
 					 int* devInfo){
 
 	// decompose and check status		
-	int* devIpiv; int devInfoLU;
-	lu_decomposition(handle, n, n, *A, lda, devIpiv, &devInfoLU);
-	if(!devInfoLU){
-		(devInfoLU < 0) ? printf("\nLU decomposition have failed. wrong parameter is %d\n", -devInfoLU):
-						  printf("\nLU decomposition have failed. U(%d,%d) = 0\n", devInfoLU);
-	}
-
+	int* devIpiv; int* devInfoLU; checkCudaErrors(cudaMalloc((void**)&devInfoLU, sizeof(int)));
+	checkCudaErrors(cudaMalloc((void**)&devIpiv, n * sizeof(int)));
+	lu_decomposition(handle, n, n, *A, lda, devIpiv, devInfoLU);
+	checkDevInfo(devInfoLU);
 	// solve equation
 	checkCuSolverErrors(cusolverDnCgetrs(handle, CUBLAS_OP_N, n, 1, (const cuComplex*)*A, lda,
 	                                     (const int*)devIpiv, B, ldb, devInfo));
+	// free memory
+	cudaFreeMem((void*)devIpiv, (void*)devInfoLU);
 }
 
 
-void dense_lu_solver(usolverDnHandle_t handle,
+void dense_lu_solver(cusolverDnHandle_t handle,
 					 int n,
 					 cuDoubleComplex** A,
 					 int lda,
@@ -3124,25 +3141,247 @@ void dense_lu_solver(usolverDnHandle_t handle,
 					 int* devInfo){
 
 	// decompose and check status		
-	int* devIpiv; int devInfoLU;
-	lu_decomposition(handle, n, n, *A, lda, devIpiv, &devInfoLU);
-	if(!devInfoLU){
-		(devInfoLU < 0) ? printf("\nLU decomposition have failed. wrong parameter is %d\n", -devInfoLU):
-						  printf("\nLU decomposition have failed. U(%d,%d) = 0\n", devInfoLU);
-	}
-
+	int* devIpiv; int* devInfoLU; checkCudaErrors(cudaMalloc((void**)&devInfoLU, sizeof(int)));
+	checkCudaErrors(cudaMalloc((void**)&devIpiv, n * sizeof(int)));
+	lu_decomposition(handle, n, n, *A, lda, devIpiv, devInfoLU);
+    checkDevInfo(devInfoLU);
 	// solve equation
-	checkCuSolverErrors(cusolverZnCgetrs(handle, CUBLAS_OP_N, n, 1, (const cuDoubleComplex*)*A, lda,
+	checkCuSolverErrors(cusolverDnZgetrs(handle, CUBLAS_OP_N, n, 1, (const cuDoubleComplex*)*A, lda,
 	                                     (const int*)devIpiv, B, ldb, devInfo));
+	// free memory
+	cudaFreeMem((void*)devIpiv, (void*)devInfoLU);
+}
+
+/*
+---------------------- SOLVING WITH QR DECOMPOSITION - Ax = b => x = R^-1 * Q^T * b ----------------------
+*/
+
+//! procedure : decompose A to A = QR, QQ^T = I, R upper triangular with cusolver<t>geqrf()
+//! calculate Q^T * b with cusolver<t>ormqr()
+//! solve Rx = B (= Q^T * b) with cublas<t>trsm()
+
+// overload (1) - float
+void dense_qr_solver(cusolverDnHandle_t cusHandle,
+					 cublasHandle_t cubHandle, 
+					 int mA, int nA,
+					 float* A,
+					 int lda,
+					 int mB, int nB,
+					 float* b,
+					 int ldb) {
+
+	//! part (1) - decompose
+	// get buffer sizes - for geqrf (decomposition) and ormqr(Q transpose)
+	float* workspace; int Lwork_geqrf; int Lwork_ormqr; float* tau; int* devInfogeqrf;
+	// allocate tau helper array
+	checkCudaErrors(cudaMalloc((void**)&tau, mB * sizeof(float)));
+	checkCudaErrors(cudaMalloc((void**)&devInfogeqrf, sizeof(int)));
+	// allocate buffers for both operations
+	checkCuSolverErrors(cusolverDnSgeqrf_bufferSize(cusHandle, mA, nA, A, lda, &Lwork_geqrf));
+	checkCuSolverErrors(cusolverDnSormqr_bufferSize(cusHandle, CUBLAS_SIDE_LEFT, CUBLAS_OP_T,
+													mB, nB, mB, A, lda, tau, b, ldb, &Lwork_ormqr));
+	// calculate lwork and allocate workspace
+	int Lwork = std::max(Lwork_geqrf, Lwork_ormqr);
+	checkCudaErrors(cudaMalloc((void**)&workspace, Lwork * sizeof(float)));
+	// decompose with geqrf
+	checkCuSolverErrors(cusolverDnSgeqrf(cusHandle, mA, nA, A, lda, tau, workspace, Lwork, devInfogeqrf));
+
+	//! part (2) - transpose
+	int* devInfo_ormqr;
+	checkCudaErrors(cudaMalloc((void**)&devInfo_ormqr, sizeof(int)));
+	checkCuSolverErrors(cusolverDnSormqr(cusHandle, CUBLAS_SIDE_LEFT, CUBLAS_OP_T,
+										 mB, nB, mB, A, lda, tau, b, ldb, workspace, Lwork, devInfo_ormqr));
+
+	// check status
+	checkDevInfo(devInfogeqrf); checkDevInfo(devInfo_ormqr);
+	//! part (3) - solve - b is also the result x
+	const float alpha = 1.0f;
+	checkCuBLAS_status(cublasStrsm_v2(cubHandle,
+									  CUBLAS_SIDE_LEFT,
+									  CUBLAS_FILL_MODE_UPPER,
+									  CUBLAS_OP_N,
+									  CUBLAS_DIAG_NON_UNIT,
+									  mB, nB, &alpha, A, lda, b, ldb));
+
+	// free memory
+	cudaFreeMem((void*)tau, (void*)workspace, (void*)devInfogeqrf, (void*)devInfo_ormqr);
+}
+
+// overload (2) - double
+void dense_qr_solver(cusolverDnHandle_t cusHandle,
+					 cublasHandle_t cubHandle, 
+					 int mA, int nA,
+					 double* A,
+					 int lda,
+					 int mB, int nB,
+					 double* b,
+					 int ldb) {
+
+	//! part (1) - decompose
+	// get buffer sizes - for geqrf (decomposition) and ormqr(Q transpose)
+	double* workspace; int Lwork_geqrf; int Lwork_ormqr; double* tau; int* devInfogeqrf;
+	// allocate tau helper array
+	checkCudaErrors(cudaMalloc((void**)&tau, mB * sizeof(double)));
+	checkCudaErrors(cudaMalloc((void**)&devInfogeqrf, sizeof(int)));
+	// allocate buffers for both operations
+	checkCuSolverErrors(cusolverDnDgeqrf_bufferSize(cusHandle, mA, nA, A, lda, &Lwork_geqrf));
+	checkCuSolverErrors(cusolverDnDormqr_bufferSize(cusHandle, CUBLAS_SIDE_LEFT, CUBLAS_OP_T,
+													mB, nB, mB, A, lda, tau, b, ldb, &Lwork_ormqr));
+	// calculate lwork and allocate workspace
+	int Lwork = std::max(Lwork_geqrf, Lwork_ormqr);
+	checkCudaErrors(cudaMalloc((void**)&workspace, Lwork * sizeof(double)));
+	// decompose with geqrf
+	checkCuSolverErrors(cusolverDnDgeqrf(cusHandle, mA, nA, A, lda, tau, workspace, Lwork, devInfogeqrf));
+
+	//! part (2) - transpose
+	int* devInfo_ormqr;
+	checkCudaErrors(cudaMalloc((void**)&devInfo_ormqr, sizeof(int)));
+	checkCuSolverErrors(cusolverDnDormqr(cusHandle, CUBLAS_SIDE_LEFT, CUBLAS_OP_T,
+										 mB, nB, mB, A, lda, tau, b, ldb, workspace, Lwork, devInfo_ormqr));
+
+	// check status
+	checkDevInfo(devInfogeqrf); checkDevInfo(devInfo_ormqr);
+	//! part (3) - solve - b is also the result x
+	const double alpha = 1.0f;
+	checkCuBLAS_status(cublasDtrsm_v2(cubHandle,
+									  CUBLAS_SIDE_LEFT,
+									  CUBLAS_FILL_MODE_UPPER,
+									  CUBLAS_OP_N,
+									  CUBLAS_DIAG_NON_UNIT,
+									  mB, nB, &alpha, A, lda, b, ldb));
+
+	// free memory
+	cudaFreeMem((void*)tau, (void*)workspace, (void*)devInfogeqrf, (void*)devInfo_ormqr);
+}
+
+// overload (3) - cuComplex data - [a,b], a float, b float <-> a + bi float complex
+void dense_qr_solver(cusolverDnHandle_t cusHandle,
+					 cublasHandle_t cubHandle, 
+					 int mA, int nA,
+					 cuComplex* A,
+					 int lda,
+					 int mB, int nB,
+					 cuComplex* b,
+					 int ldb) {
+
+	//! part (1) - decompose
+	// get buffer sizes - for geqrf (decomposition) and ormqr(Q transpose)
+	cuComplex* workspace; int Lwork_geqrf; int Lwork_ormqr; cuComplex* tau; int* devInfogeqrf;
+	// allocate tau helper array
+	checkCudaErrors(cudaMalloc((void**)&tau, mB * sizeof(cuComplex)));
+	checkCudaErrors(cudaMalloc((void**)&devInfogeqrf, sizeof(int)));
+	// allocate buffers for both operations
+	checkCuSolverErrors(cusolverDnCgeqrf_bufferSize(cusHandle, mA, nA, A, lda, &Lwork_geqrf));
+	checkCuSolverErrors(cusolverDnCunmqr_bufferSize(cusHandle, CUBLAS_SIDE_LEFT, CUBLAS_OP_T,
+													mB, nB, mB, A, lda, tau, b, ldb, &Lwork_ormqr));
+	// calculate lwork and allocate workspace
+	int Lwork = std::max(Lwork_geqrf, Lwork_ormqr);
+	checkCudaErrors(cudaMalloc((void**)&workspace, Lwork * sizeof(cuComplex)));
+	// decompose with geqrf
+	checkCuSolverErrors(cusolverDnCgeqrf(cusHandle, mA, nA, A, lda, tau, workspace, Lwork, devInfogeqrf));
+
+	//! part (2) - transpose
+	int* devInfo_ormqr;
+	checkCudaErrors(cudaMalloc((void**)&devInfo_ormqr, sizeof(int)));
+	checkCuSolverErrors(cusolverDnCunmqr(cusHandle, CUBLAS_SIDE_LEFT, CUBLAS_OP_T,
+										 mB, nB, mB, A, lda, tau, b, ldb, workspace, Lwork, devInfo_ormqr));
+
+	// check status
+	checkDevInfo(devInfogeqrf); checkDevInfo(devInfo_ormqr);
+	//! part (3) - solve - b is also the result x
+	const cuComplex alpha = static_cast<cuComplex>(1.0f);
+	checkCuBLAS_status(cublasCtrsm_v2(cubHandle,
+									  CUBLAS_SIDE_LEFT,
+									  CUBLAS_FILL_MODE_UPPER,
+									  CUBLAS_OP_N,
+									  CUBLAS_DIAG_NON_UNIT,
+									  mB, nB, &alpha, A, lda, b, ldb));
+
+	// free memory
+	cudaFreeMem((void*)tau, (void*)workspace, (void*)devInfogeqrf, (void*)devInfo_ormqr);
+}
+
+// overload (4) - cuDoubleComplex data - [a,b], a double, b double <-> a + bi double complex
+void dense_qr_solver(cusolverDnHandle_t cusHandle,
+					 cublasHandle_t cubHandle, 
+					 int mA, int nA,
+					 cuDoubleComplex* A,
+					 int lda,
+					 int mB, int nB,
+					 cuDoubleComplex* b,
+					 int ldb) {
+
+	//! part (1) - decompose
+	// get buffer sizes - for geqrf (decomposition) and ormqr(Q transpose)
+	cuDoubleComplex* workspace; int Lwork_geqrf; int Lwork_ormqr; cuDoubleComplex* tau; int* devInfogeqrf;
+	// allocate tau helper array
+	checkCudaErrors(cudaMalloc((void**)&tau, mB * sizeof(cuDoubleComplex)));
+	checkCudaErrors(cudaMalloc((void**)&devInfogeqrf, sizeof(int)));
+	// allocate buffers for both operations
+	checkCuSolverErrors(cusolverDnZgeqrf_bufferSize(cusHandle, mA, nA, A, lda, &Lwork_geqrf));
+	checkCuSolverErrors(cusolverDnZunmqr_bufferSize(cusHandle, CUBLAS_SIDE_LEFT, CUBLAS_OP_T,
+													mB, nB, mB, A, lda, tau, b, ldb, &Lwork_ormqr));
+	// calculate lwork and allocate workspace
+	int Lwork = std::max(Lwork_geqrf, Lwork_ormqr);
+	checkCudaErrors(cudaMalloc((void**)&workspace, Lwork * sizeof(cuDoubleComplex)));
+	// decompose with geqrf
+	checkCuSolverErrors(cusolverDnZgeqrf(cusHandle, mA, nA, A, lda, tau, workspace, Lwork, devInfogeqrf));
+
+	//! part (2) - transpose
+	int* devInfo_ormqr;
+	checkCudaErrors(cudaMalloc((void**)&devInfo_ormqr, sizeof(int)));
+	checkCuSolverErrors(cusolverDnZunmqr(cusHandle, CUBLAS_SIDE_LEFT, CUBLAS_OP_T,
+										 mB, nB, mB, A, lda, tau, b, ldb, workspace, Lwork, devInfo_ormqr));
+
+	// check status
+	checkDevInfo(devInfogeqrf); checkDevInfo(devInfo_ormqr);
+	//! part (3) - solve - b is also the result x
+	const cuDoubleComplex alpha = static_cast<cuDoubleComplex>(1.0f);
+	checkCuBLAS_status(cublasZtrsm_v2(cubHandle,
+									  CUBLAS_SIDE_LEFT,
+									  CUBLAS_FILL_MODE_UPPER,
+									  CUBLAS_OP_N,
+									  CUBLAS_DIAG_NON_UNIT,
+									  mB, nB, &alpha, A, lda, b, ldb));
+
+	// free memory
+	cudaFreeMem((void*)tau, (void*)workspace, (void*)devInfogeqrf, (void*)devInfo_ormqr);
+}
+
+/*
+dense matrix linear equation solver
+methods implemented into interface : LU decomposition, QR decomposition. CHOLESKY is available
+only with sparse interface.
+*/
+template<typename T>
+void LinearSolver<T>::dnGENERALsolver(cusolverDnHandle_t cusolverHandle){
+	if(D_A.M != D_A.N) printf("\nentered a NON square matrix - cuSOLVER API cannot solve LU method request\n");
+	// allocate devInfo pointer as a status for the operation
+	int* devInfo; checkCudaErrors(cudaMalloc((void**)&devInfo, sizeof(int)));
+	//! if a new vector is scanned - copy the vector into the solution vector. 
+	//! PURPOSE: in cuSOLVER dense API the b vector is also changed and retured as the solution,
+	//! the following flag is used for keeping b content and change only the solution vector.
+	if(vector_inserted) solution = b;
+	if(_fact == LU){
+		dense_lu_solver(cusolverHandle, D_A.M, &D_A.data, D_A.M, solution.data, solution.M, devInfo);
+		checkDevInfo(devInfo);
+	}
+	else if(_fact == QR){
+		cublasHandle_t cublasHandle;
+		checkCuBLAS_status(cublasCreate_v2(&cublasHandle));
+		dense_qr_solver(cusolverHandle, cublasHandle, D_A.M, D_A.N, D_A.data, D_A.M,
+						solution.M, solution.N, solution.data, solution.M);
+		checkCuBLAS_status(cublasDestroy_v2(cublasHandle));
+	}
 }
 
 // general solver - takes either dense or sparse matrices according to _sparse input.
 template<typename T>
-void LinearSolver<T>::Solve(){
+vector<T> LinearSolver<T>::Solve(){
 	// allocate memory for equation solution vector
 	size_t sol_size = (_sparse) ? S_A.N * sizeof(T) : D_A.N * sizeof(T);
-	checkCudaErrors(cudaMalloc((void**)&solution.data, sol_size)); // REMEMBER TO FREE
-
+	if(solution.empty)checkCudaErrors(cudaMalloc((void**)&solution.data, sol_size)); // REMEMBER TO FREE
+	solution.empty = false;
 	// create matrix handle - default - CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO
 	cusparseMatDescr_t generalMatDescr;
 	checkCuSparseErrors(cusparseCreateMatDescr(&generalMatDescr));
@@ -3161,8 +3400,12 @@ void LinearSolver<T>::Solve(){
 		cusolverDnHandle_t dnHandle;
 		checkCuSolverErrors(cusolverDnCreate(&dnHandle));
 		// solve
+		dnGENERALsolver(dnHandle);
 		checkCuSolverErrors(cusolverDnDestroy(dnHandle));
 	}
-	// free matrix descriptor memory
-	checkCuSparseErrors(cusparseDestroyMatDescr(generalMatDescr));
+	//! free matrix descriptor memory - vector_inserted is set to false when the solver 
+	//! works out a solution. if no new vector is scanned then b is "old" and not changed
+	//! for reusing the solver. otherwise, the flag turnes true.
+	checkCuSparseErrors(cusparseDestroyMatDescr(generalMatDescr)); vector_inserted = false;
+	return solution;
 }
