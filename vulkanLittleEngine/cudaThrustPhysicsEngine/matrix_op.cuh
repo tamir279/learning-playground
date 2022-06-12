@@ -10,6 +10,7 @@
 #include <cusparseLt.h>
 #include <cusolverDn.h>
 #include <cusolverSp.h>
+#include <cuComplex.h>
 
 __global__ void printMeDev(float* P, int m, int n) {;
 	for (int i = 0; i < m; i++) {
@@ -1140,9 +1141,9 @@ void Sparse_mat<T>::createCSR() {
 // destroy CSR format sparse matrix handle and free all csr arrays
 template<typename T>
 void Sparse_mat<T>::destroyCSR() {
-	CSR_enabled = false;
 	cudaFreeMem((void*)csrRowOffsets, (void*)csrColInd, (void*)csrValues);
-	checkCuSparseErrors(cusparseDestroySpMat(SpMatDescr));
+	if(CSR_enabled)checkCuSparseErrors(cusparseDestroySpMat(SpMatDescr));
+	CSR_enabled = false;
 }
 
 // determine compute type for cusparseLt sparse-dense multiplication routine
@@ -2551,20 +2552,21 @@ void LinearSolver<T>::I_matrix(Sparse_mat<T>& A) {
 	else {
 		// get sizes - nnz = A.csrRowOffsets[M] - A.csrRowOffsets[0]
 		int32_t rows; int32_t cols; int32_t nnz;
-		checkCuSparseErrors(cusparseSpMatGetSize(A.SpMatDescr, &rows, &cols, &nnz));
-
-		// allocate memory and copy CSR data to S_A
+		checkCuSparseErrors(cusparseSpMatGetSize(A.SpMatDescr, (int64_t*)&rows, (int64_t*)&cols, (int64_t*)&nnz));
+		S_A.nnz = nnz;
+		//! allocate memory and copy CSR data to S_A - effectively does createCSR() without converting from dense
+		//! represntation to a sparse one.
 		checkCudaErrors(cudaMalloc((void**)&S_A.csrRowOffsets, (rows + 1) * sizeof(int32_t)));
 		checkCudaErrors(cudaMalloc((void**)&S_A.csrColInd, nnz * sizeof(int32_t)));
 		checkCudaErrors(cudaMalloc((void**)&S_A.csrValues, nnz * sizeof(T)));
 
 		// copying data
-		asyncMemcopy({A.csrRowOffsets, A.csrColInd},
-		 			 {S_A.csrRowOffsets, S_A.csrColInd},
-					 {(rows + 1) * sizeof(int32_t), nnz * sizeof(int32_t)}
-		 			 {cudaMemcpyDeviceToDevice, cudaMemcpyDeviceToDevice}, 2);
+		asyncMemcopy<int32_t>({A.csrRowOffsets, A.csrColInd},
+		 					  {S_A.csrRowOffsets, S_A.csrColInd},
+							  {(rows + 1) * sizeof(int32_t), nnz * sizeof(int32_t)},
+		 			          {cudaMemcpyDeviceToDevice, cudaMemcpyDeviceToDevice}, 2);
 		
-		asyncMemcopy({A.csrValues}, {S_A.csrValues}, {nnz * sizeof(int32_t)}, {cudaMemcpyDeviceToDevice}, 1);
+		asyncMemcopy<T>({A.csrValues}, {S_A.csrValues}, {nnz * sizeof(T)}, {cudaMemcpyDeviceToDevice}, 1);
 		// it is not needed to create a sparse matrix descriptor due to cuSOLVER's support of general cusparseMatdescr_t only
 	}
 }
@@ -2580,7 +2582,7 @@ void LinearSolver<T>::I_vector(vector<T>& v) {
 		// allocate data on b
 		checkCudaErrors(cudaMalloc((void**)&b.data, v.M * v.N * sizeof(T)));
 		// copy data from v to b
-		asyncMemcopy({ v.data }, { b.data }, { v.M * v.N * sizeof(T) }, { cudaMemcpyDeviceToDevice }, 1);
+		asyncMemcopy<T>({ v.data }, { b.data }, { v.M * v.N * sizeof(T) }, { cudaMemcpyDeviceToDevice }, 1);
 		// it is not needed to create a dense vector descriptor due to cuSOLVER's support of general cusparseMatdescr_t only
 	}
 }
@@ -2979,7 +2981,7 @@ void checkDevInfo(int* d_devInfo){
 	//! checking
 	if(h_devInfo){
 		(h_devInfo < 0) ? printf("\ncuSOLVER routine have failed. wrong parameter is %d\n", -h_devInfo):
-						  printf("\ncuSOLVER routine have failed. U(%d,%d) = 0\n", h_devInfo);
+						  printf("\ncuSOLVER routine have failed. U(%d,%d) = 0\n", h_devInfo, h_devInfo);
 	}
 }
 
@@ -3289,7 +3291,7 @@ void dense_qr_solver(cusolverDnHandle_t cusHandle,
 	// check status
 	checkDevInfo(devInfogeqrf); checkDevInfo(devInfo_ormqr);
 	//! part (3) - solve - b is also the result x
-	const cuComplex alpha = static_cast<cuComplex>(1.0f);
+	const cuComplex alpha = static_cast<cuComplex>(make_cuComplex(1.0f, 0.0f));
 	checkCuBLAS_status(cublasCtrsm_v2(cubHandle,
 									  CUBLAS_SIDE_LEFT,
 									  CUBLAS_FILL_MODE_UPPER,
@@ -3336,7 +3338,7 @@ void dense_qr_solver(cusolverDnHandle_t cusHandle,
 	// check status
 	checkDevInfo(devInfogeqrf); checkDevInfo(devInfo_ormqr);
 	//! part (3) - solve - b is also the result x
-	const cuDoubleComplex alpha = static_cast<cuDoubleComplex>(1.0f);
+	const cuDoubleComplex alpha = static_cast<cuDoubleComplex>(make_cuDoubleComplex(1.0f, 0.0f));
 	checkCuBLAS_status(cublasZtrsm_v2(cubHandle,
 									  CUBLAS_SIDE_LEFT,
 									  CUBLAS_FILL_MODE_UPPER,
@@ -3409,3 +3411,4 @@ vector<T> LinearSolver<T>::Solve(){
 	checkCuSparseErrors(cusparseDestroyMatDescr(generalMatDescr)); vector_inserted = false;
 	return solution;
 }
+
