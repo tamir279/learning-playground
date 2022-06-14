@@ -2551,16 +2551,16 @@ void LinearSolver<T>::I_matrix(Sparse_mat<T>& A) {
 	}
 	else {
 		// get sizes - nnz = A.csrRowOffsets[M] - A.csrRowOffsets[0]
-		int32_t rows; int32_t cols; int32_t nnz;
-		checkCuSparseErrors(cusparseSpMatGetSize(A.SpMatDescr, (int64_t*)&rows, (int64_t*)&cols, (int64_t*)&nnz));
-		S_A.nnz = nnz;
+		int64_t rows; int64_t cols; int64_t nnz;
+		checkCuSparseErrors(cusparseSpMatGetSize(A.SpMatDescr, &rows, &cols, &nnz));
+		S_A.M = (int32_t)rows; S_A.N = (int32_t)cols; S_A.nnz = (int32_t)nnz;
 		//! allocate memory and copy CSR data to S_A - effectively does createCSR() without converting from dense
 		//! represntation to a sparse one.
 		checkCudaErrors(cudaMalloc((void**)&S_A.csrRowOffsets, (rows + 1) * sizeof(int32_t)));
 		checkCudaErrors(cudaMalloc((void**)&S_A.csrColInd, nnz * sizeof(int32_t)));
 		checkCudaErrors(cudaMalloc((void**)&S_A.csrValues, nnz * sizeof(T)));
 
-		// copying data
+		// copying data	
 		asyncMemcopy<int32_t>({A.csrRowOffsets, A.csrColInd},
 		 					  {S_A.csrRowOffsets, S_A.csrColInd},
 							  {(rows + 1) * sizeof(int32_t), nnz * sizeof(int32_t)},
@@ -2579,6 +2579,7 @@ void LinearSolver<T>::I_vector(vector<T>& v) {
 		b = v; b.empty = false;
 	}
 	else {
+		b.M = v.M; b.N = v.N; b.empty = false;
 		// allocate data on b
 		checkCudaErrors(cudaMalloc((void**)&b.data, v.M * v.N * sizeof(T)));
 		// copy data from v to b
@@ -2964,6 +2965,7 @@ void LinearSolver<T>::spGENERALsolver(cusolverSpHandle_t handle, const cusparseM
 					     0, solution.data, 
 					     &singularity);
 	}
+	
 	printf("\n U matrix singularity is : %d\n", singularity); 
 }
 
@@ -3381,8 +3383,9 @@ void LinearSolver<T>::dnGENERALsolver(cusolverDnHandle_t cusolverHandle){
 template<typename T>
 vector<T> LinearSolver<T>::Solve(){
 	// allocate memory for equation solution vector
-	size_t sol_size = (_sparse) ? S_A.N * sizeof(T) : D_A.N * sizeof(T);
-	if(solution.empty)checkCudaErrors(cudaMalloc((void**)&solution.data, sol_size)); // REMEMBER TO FREE
+	int32_t sol_size = (_sparse) ? S_A.N : D_A.N;
+	solution.M = sol_size; solution.N = 1;
+	if (solution.empty)checkCudaErrors(cudaMalloc((void**)&solution.data, sol_size * sizeof(T))); // REMEMBER TO FREE
 	solution.empty = false;
 	// create matrix handle - default - CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO
 	cusparseMatDescr_t generalMatDescr;
