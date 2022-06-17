@@ -54,6 +54,7 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 11.6.props" />
   </ImportGroup>
   <ImportGroup Label="Shared">
   </ImportGroup>
@@ -140,8 +141,18 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="accelerated_3D_physics_engine.cpp" />
+    <ClCompile Include="quaternion_math.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="accLinAlg.cuh" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="body_physics.cuh" />
+    <ClInclude Include="quaternion_math.h" />
+    <ClInclude Include="thrustWrappers.cuh" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 11.6.targets" />
   </ImportGroup>
 </Project>

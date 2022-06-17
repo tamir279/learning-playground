@@ -18,5 +18,24 @@
     <ClCompile Include="accelerated_3D_physics_engine.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="quaternion_math.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="accLinAlg.cuh">
+      <Filter>Source Files</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="quaternion_math.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="body_physics.cuh">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="thrustWrappers.cuh">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
