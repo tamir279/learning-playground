@@ -1,7 +1,12 @@
 #include <unordered_map>
 #include <string>
 #include <tuple>
+#include <thrust/tuple.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
 #include "quaternion_math.h"
+#include "thrustWrappers.cuh"
+#include "accLinAlg.cuh"
 
 // gravitational acceleration
 const float G = 9.81;
@@ -18,15 +23,8 @@ enum EXT_pParam{
     ANGULAR_VELOCITY
 };
 
-enum INT_pParam{
-    DAMPING_MATRIX,
-    PARTICLE_DISPLACEMENT_VECTOR,
-    EXTERNAL_PARTICLE_DISPLACEMENT,
-    OUTER_SURFACE
-};
-
 struct particle {
-    std::tuple<float, float, float> center;
+    thrust::tuple<float, float, float> center;
     float radius;
     float mass;
 };
@@ -66,11 +64,12 @@ public:
     /*
     -------------- dynamic data --------------
     */
-    std::vector<particle> particles;
+    std::vector<particle> particles; int systemSize;
     // current body state
     std::unordered_map<EXT_pParam, std::vector<std::tuple<float, float, float>>> rigidState;
     // current internal body state
-    std::unordered_map<INT_pParam, std::vector<float>> internalState;
+    Sparse_mat<float> DampingMatrix(systemSize, systemSize, memLocation::HOST_PINNED);
+    vector<float> DisplacementVector(systemSize, 1, memLocation::HOST_PINNED);
 
     /*
     ---------------------------------------
@@ -79,7 +78,7 @@ public:
     */
 
     rigid_body(const std::string modelPath, const float _mass, const float _rigidity){
-        readGeometryToData(modelPath);
+        readGeometryToData(modelPath, systemSize);
         calculateRestitutionConstant(_rigidity);
         mass = _mass; rigidity = _rigidity;
     }
@@ -88,7 +87,7 @@ public:
     void advance();
 private:
     // data management
-    void readGeometryToData(const std::string modelPath);
+    void readGeometryToData(const std::string modelPath, int& size);
     void transferToRawGeometricData();
     void transferToParticleData();
     void calculateRestitutionConstant(const float rigidity);

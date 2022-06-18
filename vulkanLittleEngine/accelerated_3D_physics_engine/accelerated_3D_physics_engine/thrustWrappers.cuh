@@ -3,6 +3,8 @@
 #include <thrust/transform.h>
 #include <thrust/extrema.h>
 #include <thrust/execution_policy.h>
+#include <thrust/host_vector.h>
+#include <thrust/device_vector.h>
 #include <thrust/device_ptr.h>
 #include <thrust/sequence.h>
 #include <thrust/iterator/transform_iterator.h>
