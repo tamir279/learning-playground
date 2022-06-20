@@ -14,6 +14,7 @@ const float G = 9.81;
 enum EXT_pParam{
     FORCE_DISTRIBUTION,
     CENTER_MASS,
+    LINEAR_VELOCITY,
     ROTATION,
     LINEAR_MOMENTUM,
     ANGULAR_MOMENTUM,
@@ -60,11 +61,17 @@ public:
     float mass;
     float rigidity; // range [0, 1] 
     float e; // restitution constant, range [0, 1] 
+    float dt;
 
+    // body inverse inertia tensor
+    std::vector<std::tuple<float, float, float>> inverseBodyInertia; // body constant describing mass distributions
+                                                                     // in world coordinates. time variant inertia tensor is local.
     /*
     -------------- dynamic data --------------
     */
-    std::vector<particle> particles; int systemSize;
+    std::vector<particle> particles; 
+    std::vector<particle> relativeParticles;
+    int systemSize;
     // current body state
     std::unordered_map<EXT_pParam, std::vector<std::tuple<float, float, float>>> rigidState;
     // current internal body state
@@ -77,10 +84,10 @@ public:
     ---------------------------------------
     */
 
-    rigid_body(const std::string modelPath, const float _mass, const float _rigidity){
+    rigid_body(const std::string modelPath, const float _mass, const float _rigidity, const float time_step){
         readGeometryToData(modelPath, systemSize);
         calculateRestitutionConstant(_rigidity);
-        mass = _mass; rigidity = _rigidity;
+        mass = _mass; rigidity = _rigidity; dt = time_step;
     }
 
     void init();
@@ -96,8 +103,10 @@ private:
     // init rigid body state
     void initForceDistribution();
     void initCenterMass();
+    void initRelativeDistances();
+    void initLinearVelocity();
     void initRotation();
-    void initLinearMomentum();
+    //void initLinearMomentum();
     void initAngularMomentum();
     void initTotalExternalForce();
     void initTorque();
@@ -112,8 +121,9 @@ private:
     // rigid body physical calculations - for the NEXT step!
     void calculateForceDistribution();
     void calculateCenterMass();
+    void calculateLinearVelocity();
     void calculateRotation();
-    void calculateLinearMomentum();
+    //void calculateLinearMomentum();
     void calculateAngularMomentum();
     void calculateTotalExternalForce();
     void calculateTorque();
@@ -125,5 +135,7 @@ private:
     void updateDisplacementVector();
     void decomposeExternalForces();
     void getOuterSurfaceDeformation();
+    // get the sum of all changes in place - linear + angular + inner - and update particle center positions
+    void updatePosition();
 };
 

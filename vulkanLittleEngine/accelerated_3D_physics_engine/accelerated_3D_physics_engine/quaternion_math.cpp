@@ -75,6 +75,14 @@ quaternion quaternion::operator*(const float scale) {
 	return q_res;
 }
 
+// for multiplying scalars on the left...
+quaternion operator*(const float scale, const quaternion& q) {
+	quaternion q_res;
+	q_res.s = q.s * scale;
+	q_res.vector = q.vector * scale;
+	return q_res;
+}
+
 /*
 a fast square root algorithm for accelerated (and mostly precise)
 approximation of the square root of a number

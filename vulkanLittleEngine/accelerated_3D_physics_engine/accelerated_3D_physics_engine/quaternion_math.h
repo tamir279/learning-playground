@@ -32,7 +32,7 @@ public:
 	quaternion operator*(const quaternion& q);
 	void operator*=(const float scale);
 	quaternion operator*(const float scale);
-
+	friend quaternion operator*(const float scale, const quaternion& q);
 	// specified functions to use for 3d vector rotations
 
 	/*
@@ -83,3 +83,4 @@ private:
 	float fastSquareRoot(float num);
 	float DegreesToRadians(float angle);
 };
+
