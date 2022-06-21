@@ -75,8 +75,11 @@ public:
     // current body state
     std::unordered_map<EXT_pParam, std::vector<std::tuple<float, float, float>>> rigidState;
     // current internal body state
-    Sparse_mat<float> DampingMatrix(systemSize, systemSize, memLocation::HOST_PINNED);
-    vector<float> DisplacementVector(systemSize, 1, memLocation::HOST_PINNED);
+    Sparse_mat<float> DampingMatrix;
+    // during simulation it is needed to save the displacement vector at times t, t-dt, t-2dt
+    vector<float> Displacement; 
+    vector<float> Displacement_t_dt;
+    vector<float> Displacement_t_2dt;
 
     /*
     ---------------------------------------
@@ -84,17 +87,19 @@ public:
     ---------------------------------------
     */
 
-    rigid_body(const std::string modelPath, const float _mass, const float _rigidity, const float time_step){
-        readGeometryToData(modelPath, systemSize);
+    rigid_body(const std::string modelPath, const float _mass, const float _rigidity, const float time_step, const int size) : 
+    DampingMatrix(size, size, memLocation::HOST_PINNED), Displacement(size, 1, memLocation::HOST_PINNED),
+    Displacement_t_dt(size, 1, memLocation::HOST_PINNED), Displacement_t_2dt(size, 1, memLocation::HOST_PINNED) {
+        readGeometryToData(modelPath);
         calculateRestitutionConstant(_rigidity);
-        mass = _mass; rigidity = _rigidity; dt = time_step;
+        mass = _mass; rigidity = _rigidity; dt = time_step; systemSize = size;
     }
 
     void init();
     void advance();
 private:
     // data management
-    void readGeometryToData(const std::string modelPath, int& size);
+    void readGeometryToData(const std::string modelPath);
     void transferToRawGeometricData();
     void transferToParticleData();
     void calculateRestitutionConstant(const float rigidity);

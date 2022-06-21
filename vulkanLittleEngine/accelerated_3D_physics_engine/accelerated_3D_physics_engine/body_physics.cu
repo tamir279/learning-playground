@@ -1,5 +1,6 @@
 #include "body_physics.cuh"
-
+//#include <execution>
+//#include <algorithm>
 /*
 -------------------- utility functions -------------------- 
 */
@@ -140,6 +141,60 @@ std::vector<std::tuple<float, float, float>> deflatten_3(std::vector<float> vect
     return res;
 }
 
+enum operation {
+    RIGHT_TRANSPOSE_ONLY,
+    LEFT_TRANSPOSE_ONLY,
+    BOTH_TRANSPOSE,
+    NO_TRANSPOSE
+};
+
+/*
+specific case for matrix multiplication - A*B^T = |a1|                      |a1b1 a1b2 a1b3|
+                                                  |a2|  x [b1 ,b2, b3] =    |a2b1 a2b2 a3b3|   , aibj = dot(ai, bj) 
+                                                  |a3|                      |a3b1 a3b2 a3b3|          = aix*bjx + aiy*bjy + aiz*bjz
+*/
+auto multiply_3_rTranspose(std::vector<std::tuple<float, float, float>> m1,
+                           std::vector<std::tuple<float, float, float>> m2) {
+
+    std::vector<float> flattenResult;
+    for (auto& row1 : m1) {
+        for (auto& row2 : m2) {
+            /*
+              if the rows of m2 are columns - flatten result will be : [row01*row02, row01*row12, row01*row22,
+                                                                        row11*row02, row11*row12, row11*row22,
+                                                                        row21*row02, row21*row12, row21*row22]
+              */
+            flattenResult.push_back(tuple_dot(row1, row2));
+        }
+    }
+    return deflatten_3(flattenResult);
+}
+
+// change columns to be rows
+std::vector<std::tuple<float, float, float>> reorganize_mat3(std::vector<std::tuple<float, float, float>> m) {
+    auto [r1x, r1y, r1z] = m[0]; auto [r2x, r2y, r2z] = m[1]; auto [r3x, r3y, r3z] = m[2];
+    return { std::make_tuple(r1x, r2x, r3x),
+             std::make_tuple(r1y, r2y, r3y),
+             std::make_tuple(r1z, r2z, r3z) };
+}
+
+// multiply two tuple matrices
+auto multiply_3(std::vector<std::tuple<float, float, float>> m1,
+                std::vector<std::tuple<float, float, float>> m2,
+                operation status) {
+
+    // transposed matrices - for different transpose cases - the function reorganizes the matrices
+    // in order to be in right transpose format for using the multiply_3_rTranspose function
+    std::vector<std::tuple<float, float, float>> transposed1 = reorganize_mat3(m1);
+    std::vector<std::tuple<float, float, float>> transposed2 = reorganize_mat3(m2);
+    // calculation of multiplication results using tuple dot - first case : result is all of the combinations
+    // of row dot products
+    return (status == RIGHT_TRANSPOSE_ONLY) ? multiply_3_rTranspose(m1, m2) :
+           (status == LEFT_TRANSPOSE_ONLY) ? multiply_3_rTranspose(transposed1, transposed2) :
+           (status == BOTH_TRANSPOSE) ? multiply_3_rTranspose(transposed1, m2) :
+           multiply_3_rTranspose(m1, transposed2);
+}
+
 /*
 -------------------- library functions -------------------- 
 */
@@ -260,8 +315,10 @@ void rigid_body::initDampingMatrix() {
 }
 
 void rigid_body::initDisplacementVector() {
-    for (float* it = DisplacementVector.data; it != DisplacementVector.data + systemSize; ++it) {
-        *it = 0.0f;
+    for (int i = 0; i < systemSize; i++) {
+        (Displacement_t_2dt.data)[i] = 0.0f;
+        (Displacement_t_dt.data)[i] = 0.0f;
+        (Displacement.data)[i] = 0.0f;
     }
 }
 
@@ -327,27 +384,24 @@ void rigid_body::calculateAngularMomentum() {
 }
 
 void rigid_body::calculateForceDistribution() {
-
+    // for calculating with thrust - switch to thrust::tuples
 }
 
 void rigid_body::calculateTotalExternalForce() {
-    for (auto& f : rigidState[FORCE_DISTRIBUTION]) {
-        auto [x, y, z] = f;
-        std::get<0>(rigidState[TOTAL_EXTERNAL_FORCE][0]) += x;
-        std::get<1>(rigidState[TOTAL_EXTERNAL_FORCE][0]) += y;
-        std::get<2>(rigidState[TOTAL_EXTERNAL_FORCE][0]) += z;
-    }
+   // for calculating with thrust - switch to thrust::tuples
 }
 
 void rigid_body::calculateTorque() {
     // loop over force distribution and particles to get the cross products.
+    // for calculating with thrust - switch to thrust::tuples
 }
 
 /*
 I^-1 = R(t) (I_body)^-1 R(t)^T. initial 
 */
 void rigid_body::calculateInverseInertiaTensor() {
-
+    auto rt_Iinv_res = multiply_3(rigidState[ROTATION], inverseBodyInertia, NO_TRANSPOSE);
+    rigidState[INVERSE_INERTIA_TENSOR] = multiply_3(rt_Iinv_res, rigidState[ROTATION], RIGHT_TRANSPOSE_ONLY);
 }
 
 // w_n+1 = (I_n+1)^-1 * L_n+1
@@ -358,6 +412,10 @@ void rigid_body::calculateAngularVelocity() {
                                                              rigidState[ANGULAR_MOMENTUM][0]);
     std::get<2>(rigidState[ANGULAR_VELOCITY][0]) = tuple_dot(rigidState[INVERSE_INERTIA_TENSOR][2],
                                                              rigidState[ANGULAR_MOMENTUM][0]);
+}
+
+void rigid_body::updateDisplacementVector() {
+    
 }
 
 void rigid_body::advance() {
