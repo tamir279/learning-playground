@@ -414,8 +414,32 @@ void rigid_body::calculateAngularVelocity() {
                                                              rigidState[ANGULAR_MOMENTUM][0]);
 }
 
+/*
+equation : 
+(Mh + Kd - Ks) * Q_t = Mh * (2Q_(t-dt) - Q_(t-2dt)) - N * Ftotal_t
+*/
 void rigid_body::updateDisplacementVector() {
-    
+    LinearSolver<float> solver(CHOL, true);
+    auto lhsMat = infMassDistrib + DampingDistribMatrix - DampingMatrix;
+    // for sparse equation
+    Sparse_mat<float> lhs_sparse(lhsMat.M, lhsMat.N, lhsMat.memState);
+    lhs_sparse.copyData(lhsMat); lhs_sparse.createCSR();
+    // TODO : add the calculation with the total external force
+    vector<float> rhsVec = infMassDistrib % (Displacement_t_dt + Displacement_t_dt - Displacement_t_2dt);
+    // feed to solver
+    solver.I_matrix(lhs_sparse); solver.I_vector(rhsVec); 
+    // transfer old data to displacement in times t-dt, t-2dt before calculating solution
+    Displacement_t_2dt = Displacement_t_dt;
+    Displacement_t_dt = Displacement;
+    // solve
+    Displacement = solver.Solve();
+}
+
+/*
+r_total = r_cm + q_r*r0*q_r^-1 + dr, dr = Q_t[i]
+*/
+void rigid_body::updatePosition() {
+
 }
 
 void rigid_body::advance() {

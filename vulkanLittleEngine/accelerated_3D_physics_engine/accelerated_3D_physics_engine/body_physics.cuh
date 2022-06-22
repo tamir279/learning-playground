@@ -75,7 +75,12 @@ public:
     // current body state
     std::unordered_map<EXT_pParam, std::vector<std::tuple<float, float, float>>> rigidState;
     // current internal body state
-    Sparse_mat<float> DampingMatrix;
+    // K_D
+    mat<float> DampingDistribMatrix;
+    // K_sigma
+    mat<float> DampingMatrix;
+    // M_h
+    mat<float> infMassDistrib;
     // during simulation it is needed to save the displacement vector at times t, t-dt, t-2dt
     vector<float> Displacement; 
     vector<float> Displacement_t_dt;
@@ -88,8 +93,13 @@ public:
     */
 
     rigid_body(const std::string modelPath, const float _mass, const float _rigidity, const float time_step, const int size) : 
-    DampingMatrix(size, size, memLocation::HOST_PINNED), Displacement(size, 1, memLocation::HOST_PINNED),
-    Displacement_t_dt(size, 1, memLocation::HOST_PINNED), Displacement_t_2dt(size, 1, memLocation::HOST_PINNED) {
+    DampingDistribMatrix(3*size, 3*size, memLocation::DEVICE),
+    DampingMatrix(3*size, 3*size, memLocation::DEVICE),
+    infMassDistrib(3*size, 3*size, memLocation::DEVICE),
+    Displacement(3*size, 1, memLocation::DEVICE),
+    Displacement_t_dt(3*size, 1, memLocation::DEVICE),
+    Displacement_t_2dt(3*size, 1, memLocation::DEVICE) {
+
         readGeometryToData(modelPath);
         calculateRestitutionConstant(_rigidity);
         mass = _mass; rigidity = _rigidity; dt = time_step; systemSize = size;

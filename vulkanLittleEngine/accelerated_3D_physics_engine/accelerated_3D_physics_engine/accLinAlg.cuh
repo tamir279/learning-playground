@@ -269,6 +269,25 @@ public:
 		return C;
 	}
 
+	// subtruction using negate kernel and matadd
+	mat<T>& operator-=(const mat<T>& B) {
+		if (empty) throw std::length_error("empty data ");
+		mat<T> C(B.M, B.N, memLocation::DEVICE); C = B;
+		//negate B ( OR A COPY...)
+		matNegate(C.data, C.M * C.N, C.memState);
+		// add
+		return *this += C;
+	}
+
+	// same same
+	mat<T> operator-(const mat<T>& B) {
+		mat<T> C(B.M, B.N, memLocation::DEVICE); C = B;
+		//negate B ( OR A COPY...)
+		matNegate(C.data, C.M * C.N, C.memState);
+		// add
+		return *this + C;
+	}
+
 	mat<T>& operator*=(const mat<T>& B) {
 		if (empty) throw std::length_error("empty data ");
 		// allocate result matrix on device for cublas computation
@@ -368,6 +387,10 @@ public:
 	// special matrix functions
 	// transpose - using tiled transpose kernel
 	void transpose();
+
+protected:
+	// matrix negation - for subtraction
+	void matNegate(T* mat, int N, memLocation memLoc);
 
 private:
 	// memory and device management ( + overloads)
@@ -689,6 +712,34 @@ void cublasGemm_wrapper(cublasHandle_t handle,
 									algo));
 }
 
+// custom kernel for negating array/matrix values
+template<typename T>
+__global__ void negate(T* mat, int N) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	if (i < N) {
+		mat[i] *= static_cast<T>(-1);
+	}
+}
+
+// negate input data by defining microprocessor mapping info (number of blocks, threads per block) and 
+// calling the negate kernel
+template<typename T>
+void mat<T>::matNegate(T* mat, int N, memLocation memLoc) {
+	// check if mat is allocated in device or host
+	T* d_mat;
+	bool mem_status = checkToAllocateOnDevice((const T*)mat, &d_mat, N, 1, memLoc);
+	// call kernel
+	int threadsPerBlock = 256;
+	int blocksPerGrid = (N + threadsPerBlock - 1) / threadsPerBlock;
+	negate<T> <<<blocksPerGrid, threadsPerBlock>>> ((mem_status) ? d_mat : mat, N);
+
+	// copy memory and delete extra allocated memory if needed
+	if (mem_status) { 
+		dynamicCopy(mat, d_mat, N, 1, memLoc, memLocation::DEVICE);
+		checkCudaErrors(cudaFree(d_mat));
+	}
+}
+
 // C is defined to be allocated on device in matrix operators - no need for
 // memory Location check
 template<typename T>
@@ -867,6 +918,9 @@ public:
 	Sparse_mat<T>& operator*=(const mat<T>& B);
 	// sparse on sparse
 	Sparse_mat<T>& operator*=(const Sparse_mat<T>& B);
+	// copy data
+	void copyData(const Sparse_mat<T>& B);
+	void copyData(const mat<T>& B);
 
 private:
 	/*
@@ -1170,6 +1224,42 @@ cudaDataType Sparse_mat<T>::cusparseM_T() {
 	type = CUDA_R_16F;
 
 	return type;
+}
+
+// overload (1)
+template<typename T>
+void Sparse_mat<T>::copyData(const mat<T>& B) {
+	if (memState == B.memState) {
+		if (B.memState == memLocation::HOST || B.memState == memLocation::HOST_PINNED) {
+			checkCudaErrors(cudaMemcpy(data, B.data, B.M * B.N * sizeof(T), cudaMemcpyHostToHost));
+		}
+		else {
+			checkCudaErrors(cudaMemcpy(data, B.data, B.M * B.N * sizeof(T), cudaMemcpyDeviceToDevice));
+		}
+	}
+	else if (B.memState == memLocation::HOST || B.memState == memLocation::HOST_PINNED) {
+		checkCudaErrors(cudaMemcpy(data, B.data, B.M * B.N * sizeof(T), cudaMemcpyHostToDevice));
+	}
+	else {
+		checkCudaErrors(cudaMemcpy(data, B.data, B.M * B.N * sizeof(T), cudaMemcpyDeviceToHost));
+	}
+}
+
+// overload (2) - copying csr data
+template<typename T>
+void Sparse_mat<T>::copyData(const Sparse_mat<T>& B) {
+	if (CSR_enabled && B.CSR_enabled) {
+		cudaStream_t stream;
+		nnz = B.nnz;
+		checkCudaErrors(cudaStreamCreate(&stream));
+		checkCudaErrors(cudaMemcpyAsync(csrColInd, B.csrColInd, B.nnz * sizeof(int32_t), cudaMemcpyDeviceToDevice, stream));
+		checkCudaErrors(cudaMemcpyAsync(csrRowOffsets, B.csrRowOffsets, (B.M + 1) * sizeof(int32_t), cudaMemcpyDeviceToDevice, stream));
+		checkCudaErrors(cudaMemcpyAsync(csrValues, B.csrValues, B.nnz * sizeof(T), cudaMemcpyDeviceToDevice, stream));
+		checkCudaErrors(cudaStreamSynchronize(stream));
+
+		// destroy stream
+		checkCudaErrors(cudaStreamDestroy(stream));
+	}
 }
 
 /*
@@ -2055,6 +2145,9 @@ public:
 	// assignment operators - vector to vector
 	vector<T> operator+(const vector<T>& v);
 	vector<T>& operator+=(const vector<T>& v);
+	// subtraction
+	vector<T> operator-(const vector<T>& v);
+	vector<T>& operator-=(const vector<T>& v);
 	// vec1(1xM)*vec2(Mx1)
 	T operator*(const vector<T>& v);
 	// vec1(Mx1)*vec2(1xM)
@@ -2190,6 +2283,26 @@ vector<T>& vector<T>::operator+=(const vector<T>& v) {
 	// addition kernel
 	vector_addition(data, v.data, data, M, memState, v.memState);
 	return *this;
+}
+
+// subtraction using matnegate and vecadd
+template<typename T>
+vector<T>& vector<T>::operator-=(const vector<T>& v) {
+	vector<T> v_b(v.M, v.N, v.memState); v_b = v;
+	// negate v
+	mat<T>::matNegate(v_b.data, v_b.M * v_b.N, v_b.memState);
+	// add the negative in order to subtract
+	return *this += v_b;
+}
+
+// subtraction using matnegate and vecadd
+template<typename T>
+vector<T> vector<T>::operator-(const vector<T>& v) {
+	vector<T> v_b(v.M, v.N, v.memState); v_b = v;
+	// negate v
+	mat<T>::matNegate(v_b.data, v_b.M * v_b.N, v_b.memState);
+	// add the negative in order to subtract
+	return *this + v_b;
 }
 
 // basic dot product kernel
