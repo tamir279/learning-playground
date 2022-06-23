@@ -30,17 +30,24 @@ struct particle {
     float mass;
 };
 
-class geometryLoader{
+class geometricData{
 public:
     // loaded data from model .obj file.
-    std::vector<std::tuple<float, float, float>> vertices;
-    std::vector<std::tuple<float, float, float>> normals;
+    std::vector<thrust::tuple<float, float, float>> vertices;
+    std::vector<thrust::tuple<float, float, float>> normals;
     std::vector<int> indices;
 
     // construction
-    geometryLoader(const std::string modelPath){
+    geometricData(const std::string modelPath){
         readData(modelPath);
     }
+
+    // convert vertices to std::vector<particle> surface
+    std::vector<particle> convertVerticesToBodySurface();
+    // get std::vector<thrust::tuple<particle, particle, particle>> consisting of all triangles
+    std::vector<thrust::tuple<particle, particle, particle>> getSurfacePolygons();
+    // update vertices and normals
+    void updateData();
 
 private:
     void readData(const std::string modelPath);
@@ -61,7 +68,10 @@ public:
     float mass;
     float rigidity; // range [0, 1] 
     float e; // restitution constant, range [0, 1] 
-    float dt;
+    float dt; // time delta
+    float n; // gas mol number
+    float R; // ideal gas constant
+    float T; // temprature
 
     // body inverse inertia tensor
     std::vector<std::tuple<float, float, float>> inverseBodyInertia; // body constant describing mass distributions
@@ -69,6 +79,12 @@ public:
     /*
     -------------- dynamic data --------------
     */
+    // face particles - vertices + vertex normals
+    geometricData bodySurface;
+    // approximate body volum
+    float V_approx;
+
+    // all of the particles consisting the body
     std::vector<particle> particles; 
     std::vector<particle> relativeParticles;
     int systemSize;
@@ -92,17 +108,20 @@ public:
     ---------------------------------------
     */
 
-    rigid_body(const std::string modelPath, const float _mass, const float _rigidity, const float time_step, const int size) : 
+    rigid_body(const std::string modelPath, const float _mass, const float _rigidity, const float time_step, const int size, 
+               const float moleNum, const float idealGasConst, const float temperature) : 
     DampingDistribMatrix(3*size, 3*size, memLocation::DEVICE),
     DampingMatrix(3*size, 3*size, memLocation::DEVICE),
     infMassDistrib(3*size, 3*size, memLocation::DEVICE),
     Displacement(3*size, 1, memLocation::DEVICE),
     Displacement_t_dt(3*size, 1, memLocation::DEVICE),
-    Displacement_t_2dt(3*size, 1, memLocation::DEVICE) {
+    Displacement_t_2dt(3*size, 1, memLocation::DEVICE),
+    bodySurface(modelPath){
 
         readGeometryToData(modelPath);
         calculateRestitutionConstant(_rigidity);
         mass = _mass; rigidity = _rigidity; dt = time_step; systemSize = size;
+        n = moleNum; R = idealGasConst; T = temperature;
     }
 
     void init();

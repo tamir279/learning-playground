@@ -199,6 +199,14 @@ auto multiply_3(std::vector<std::tuple<float, float, float>> m1,
 -------------------- library functions -------------------- 
 */
 
+// calculate ideal gas pressure that approximate the pressure on the surface of a soft body
+// p = nRT/V 
+float calculatePressure(float n, float R, float T, float V) {
+    return n * R * T / V;
+}
+
+
+
 // the force distribution will consist of a flatten vector of triplets representing coordinates
 // in 3D space (force direction)
 void rigid_body::initForceDistribution(){
