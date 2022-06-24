@@ -35,6 +35,30 @@ float tuple_dot(std::tuple<float, float, float> v1, std::tuple<float, float, flo
            std::get<2>(v1) * std::get<2>(v2);
 }
 
+// cross product
+__host__ __device__
+thrust::tuple<float, float, float> thrust_cross(thrust::tuple<float, float, float> v1, thrust::tuple<float, float, float> v2){
+    return thrust::make_tuple(thrust::get<1>(v1) * thrust::get<2>(v2) - thrust::get<2>(v1) * thrust::get<1>(v2),
+                              thrust::get<2>(v1) * thrust::get<0>(v2) - thrust::get<0>(v1) * thrust::get<2>(v2),
+                              thrust::get<0>(v1) * thrust::get<1>(v2) - thrust::get<1>(v1) * thrust::get<0>(v2));
+}
+
+// addition/subrtaction
+__host__ __device__ 
+thrust::tuple<float, float, float> thurst_plus(thrust::tuple<float, float, float> v1, thrust::tuple<float, float, float> v2){
+    return thrust::make_tuple(thrust::get<0>(v1) + thrust::get<0>(v2),
+                              thrust::get<1>(v1) + thrust::get<1>(v2),
+                              thrust::get<2>(v1) + thrust::get<2>(v2));
+}
+
+__host__ __device__ 
+thrust::tuple<float, float, float> thurst_minus(thrust::tuple<float, float, float> v1, thrust::tuple<float, float, float> v2){
+    return thrust::make_tuple(thrust::get<0>(v2) - thrust::get<0>(v1),
+                              thrust::get<1>(v2) - thrust::get<1>(v1),
+                              thrust::get<2>(v2) - thrust::get<2>(v1));
+}
+
+
 // vector product (r*r^T) - outer product
 __host__ __device__
 thrust::device_vector<float> outerProduct(thrust::tuple<float, float, float> v1,
@@ -195,9 +219,21 @@ auto multiply_3(std::vector<std::tuple<float, float, float>> m1,
            multiply_3_rTranspose(m1, transposed2);
 }
 
-/*
--------------------- library functions -------------------- 
-*/
+// struct made for calculating a polygon area and summing over all areas to get the surface
+// area of the body
+struct polygonAreaAddition : public thrust::binary_function<thrust::tuple<particle, particle, particle>,
+    thrust::tuple<particle, particle, particle>,
+    float> {
+
+    __host__ __device__ float operator()(thrust::tuple<particle, particle, particle> polygon1,
+        thrust::tuple<particle, particle, particle> polygon2) {
+
+        // get area of polygon1
+        auto cross1 = thrust_cross(thurst_minus(thrust::get<0>(polygon1).center, thrust::get<1>(polygon1).center),
+                                   thurst_minus(thrust::get<0>(polygon1).center, thrust::get<2>(polygon1).center));
+        
+    }
+};
 
 // calculate ideal gas pressure that approximate the pressure on the surface of a soft body
 // p = nRT/V 
@@ -205,7 +241,52 @@ float calculatePressure(float n, float R, float T, float V) {
     return n * R * T / V;
 }
 
+// calculate the magnitude of the pressure force working on each particle of
+// the soft body
+float calculatePressureForceMagnitude(float n, float R, float T, float V, geometricData model){
+    auto polygons = model.surfacePolygons;
+}
 
+enum Dir{X, Y, Z};
+
+struct DirExtremum : public thrust::binary_function<thrust::tuple<float, float, float>,
+                                                    thrust::tuple<float, float, float>,
+                                                    bool> {
+    Dir direction;
+
+    // constructor for initializing direction choice
+    DirExtremum(const Dir dir) : direction{ dir } {}
+
+    __host__ __device__ bool operator()(thrust::tuple<float, float, float> p1,
+                                        thrust::tuple<float, float, float> p2) {
+
+        if (direction == X) return thrust::get<0>(p1) > thrust::get<0>(p2);
+        else if (direction == Y) return thrust::get<1>(p1) > thrust::get<1>(p2);
+        else return thrust::get<2>(p1) > thrust::get<2>(p2);
+    }
+};
+
+std::tuple<float, float, float> findBoxDimensions(const std::vector<thrust::tuple<float, float, float>> box){
+    // x dimension
+    auto max_x = thrust_wrapper_max_element(true, box.begin(), box.end(), DirExtremum(X));
+    auto min_x = thrust_wrapper_min_element(true, box.begin(), box.end(), DirExtremum(X));
+    // y direction
+    auto max_y = thrust_wrapper_max_element(true, box.begin(), box.end(), DirExtremum(Y));
+    auto min_y = thrust_wrapper_min_element(true, box.begin(), box.end(), DirExtremum(Y));
+    // z direction
+    auto max_z = thrust_wrapper_max_element(true, box.begin(), box.end(), DirExtremum(Z));
+    auto min_z = thrust_wrapper_min_element(true, box.begin(), box.end(), DirExtremum(Z));
+    // return the lengths
+    return std::make_tuple(thrust::get<0>(*max_x) - thrust::get<0>(*min_x),
+                           thrust::get<1>(*max_y) - thrust::get<1>(*min_y),
+                           thrust::get<2>(*max_z) - thrust::get<2>(*min_z));
+}
+
+/*
+-----------------------------------------------------------
+-------------------- library functions --------------------
+----------------------------------------------------------- 
+*/
 
 // the force distribution will consist of a flatten vector of triplets representing coordinates
 // in 3D space (force direction)
@@ -352,12 +433,26 @@ void rigid_body::init() {
 ------------------------------------------------------------------------------------
 */
 
+// calculate updated body volume - for pressure force calculations and
+// for deformation measuring - approximating with a box  
+// option for accurate integration : gauss' law
+void rigid_body::calculateBodyVolume() {
+    auto [x, y, z] = findBoxDimensions(bodySurface.bounding_box);
+    V_approx = x * y * z;
+}
+
+void rigid_body::calculatePressureForce(){
+    
+}
+
+// r_cm_n+1 = r_cm_n + dt*vx_n
 void rigid_body::calculateCenterMass() {
     auto [cx, cy, cz] = rigidState[CENTER_MASS][0];
     auto [vx, vy, vz] = rigidState[LINEAR_VELOCITY][0];
     rigidState[CENTER_MASS][0] = std::make_tuple(cx + dt * vx, cy + dt * vy, cz + dt * vz);
 }
 
+// v_n+1 = v_n + dt*a_n = v_n + dt*f_n/m
 void rigid_body::calculateLinearVelocity() {
     auto [vx, vy, vz] = rigidState[LINEAR_VELOCITY][0];
     auto [fx, fy, fz] = rigidState[TOTAL_EXTERNAL_FORCE][0];
@@ -389,6 +484,10 @@ void rigid_body::calculateAngularMomentum() {
     auto [tx, ty, tz] = rigidState[TORQUE][0];
     auto [Lx, Ly, Lz] = rigidState[ANGULAR_MOMENTUM][0];
     rigidState[ANGULAR_MOMENTUM][0] = std::make_tuple(Lx + dt * tx, Ly + dt * ty, Lz + dt * tz);
+}
+
+void rigid_body::calculatePressureForce() {
+
 }
 
 void rigid_body::calculateForceDistribution() {
@@ -445,6 +544,8 @@ void rigid_body::updateDisplacementVector() {
 
 /*
 r_total = r_cm + q_r*r0*q_r^-1 + dr, dr = Q_t[i]
+ - for particle positions. for relative positions:
+ r_total_rel = r_total - r_cm
 */
 void rigid_body::updatePosition() {
 
@@ -452,6 +553,7 @@ void rigid_body::updatePosition() {
 
 void rigid_body::advance() {
     // rigid body data
+    calculateBodyVolume();
     calculateCenterMass();
     calculateLinearVelocity();
     calculateRotation();

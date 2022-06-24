@@ -35,21 +35,34 @@ public:
     // loaded data from model .obj file.
     std::vector<thrust::tuple<float, float, float>> vertices;
     std::vector<thrust::tuple<float, float, float>> normals;
+    std::vector<thrust::tuple<particle, particle, particle>> surfacePolygons;
     std::vector<int> indices;
+
+    // built data for fast calculations
+    std::vector<thrust::tuple<float, float, float>> bounding_box;
 
     // construction
     geometricData(const std::string modelPath){
+        // load vertices, normals, surface polygons and index arrays
         readData(modelPath);
     }
-
     // convert vertices to std::vector<particle> surface
     std::vector<particle> convertVerticesToBodySurface();
-    // get std::vector<thrust::tuple<particle, particle, particle>> consisting of all triangles
-    std::vector<thrust::tuple<particle, particle, particle>> getSurfacePolygons();
+    // convert vertex normals to face normals : 
+    // {nv1, nv2, nv3,...} in R^(vertices.size()x1) -> {nF1, nF2, nF3,...} in R^(indices.size()/3)
+    void convertToFaceNormals(const bool normalize);
+    // convert from face normals to vertex normals : 
+    // {nF1, nF2, nF3,...} in R^(indices.size()/3) -> {nv1, nv2, nv3,...} in R^(vertices.size()x1)
+    void convertToVertexNormals(const bool normalize);
     // update vertices and normals
     void updateData();
 
 private:
+    // fit bounding box to the model
+    void fitBoundingBox();
+    // build all triangles by using the indices along with corresponding vertices to create 
+    // a polygon array
+    void getSurfacePolygons();
     void readData(const std::string modelPath);
 
 };
@@ -153,6 +166,8 @@ private:
 
     // -------- advance state one step --------
     // rigid body physical calculations - for the NEXT step!
+    void calculateBodyVolume();
+    void calculatePressureForce();
     void calculateForceDistribution();
     void calculateCenterMass();
     void calculateLinearVelocity();
