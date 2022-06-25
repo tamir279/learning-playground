@@ -8,10 +8,13 @@
 #include "thrustWrappers.cuh"
 #include "accLinAlg.cuh"
 
+// TODO : change EVERYTHING from thrust::tuple<float, float, float> to float3 !!!
+
 // gravitational acceleration
 const float G = 9.81;
 
 enum EXT_pParam{
+    SPRING_DIRECTION,
     FORCE_DISTRIBUTION,
     CENTER_MASS,
     LINEAR_VELOCITY,
@@ -87,7 +90,7 @@ public:
     float T; // temprature
 
     // body inverse inertia tensor
-    std::vector<std::tuple<float, float, float>> inverseBodyInertia; // body constant describing mass distributions
+    std::vector<thrust::tuple<float, float, float>> inverseBodyInertia; // body constant describing mass distributions
                                                                      // in world coordinates. time variant inertia tensor is local.
     /*
     -------------- dynamic data --------------
@@ -102,7 +105,7 @@ public:
     std::vector<particle> relativeParticles;
     int systemSize;
     // current body state
-    std::unordered_map<EXT_pParam, std::vector<std::tuple<float, float, float>>> rigidState;
+    std::unordered_map<EXT_pParam, std::vector<thrust::tuple<float, float, float>>> rigidState;
     // current internal body state
     // K_D
     mat<float> DampingDistribMatrix;
@@ -148,6 +151,7 @@ private:
 
     // -------- initialize body state --------
     // init rigid body state
+    void initSpringDirection();
     void initForceDistribution();
     void initCenterMass();
     void initRelativeDistances();
