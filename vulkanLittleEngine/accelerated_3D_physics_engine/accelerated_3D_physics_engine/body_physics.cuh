@@ -8,8 +8,6 @@
 #include "thrustWrappers.cuh"
 #include "accLinAlg.cuh"
 
-// TODO : change EVERYTHING from thrust::tuple<float, float, float> to float3 !!!
-
 // gravitational acceleration
 const float G = 9.81;
 
@@ -28,7 +26,7 @@ enum EXT_pParam{
 };
 
 struct particle {
-    thrust::tuple<float, float, float> center;
+    float3 center;
     float radius;
     float mass;
 };
@@ -36,13 +34,13 @@ struct particle {
 class geometricData{
 public:
     // loaded data from model .obj file.
-    std::vector<thrust::tuple<float, float, float>> vertices;
-    std::vector<thrust::tuple<float, float, float>> normals;
+    std::vector<float3> vertices;
+    std::vector<float3> normals;
     std::vector<thrust::tuple<particle, particle, particle>> surfacePolygons;
     std::vector<int> indices;
 
     // built data for fast calculations
-    std::vector<thrust::tuple<float, float, float>> bounding_box;
+    std::vector<float3> bounding_box;
 
     // construction
     geometricData(const std::string modelPath){
@@ -90,8 +88,8 @@ public:
     float T; // temprature
 
     // body inverse inertia tensor
-    std::vector<thrust::tuple<float, float, float>> inverseBodyInertia; // body constant describing mass distributions
-                                                                     // in world coordinates. time variant inertia tensor is local.
+    std::vector<float3> inverseBodyInertia; // body constant describing mass distributions
+                                            // in world coordinates. time variant inertia tensor is local.
     /*
     -------------- dynamic data --------------
     */
@@ -105,8 +103,10 @@ public:
     std::vector<particle> relativeParticles;
     int systemSize;
     // current body state
-    std::unordered_map<EXT_pParam, std::vector<thrust::tuple<float, float, float>>> rigidState;
-    // current internal body state
+    std::unordered_map<EXT_pParam, std::vector<float3>> rigidState;
+    /*
+    -------------- internal body state --------------
+    */
     // K_D
     mat<float> DampingDistribMatrix;
     // K_sigma
@@ -117,6 +117,8 @@ public:
     vector<float> Displacement; 
     vector<float> Displacement_t_dt;
     vector<float> Displacement_t_2dt;
+    // linear matrix equation solver
+    LinearSolver<float> solver;
 
     /*
     ---------------------------------------
@@ -132,6 +134,7 @@ public:
     Displacement(3*size, 1, memLocation::DEVICE),
     Displacement_t_dt(3*size, 1, memLocation::DEVICE),
     Displacement_t_2dt(3*size, 1, memLocation::DEVICE),
+    solver(CHOL, true),
     bodySurface(modelPath){
 
         readGeometryToData(modelPath);

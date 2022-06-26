@@ -6,27 +6,23 @@
 */
 
 //! tuple convertions
-// straight forward, convert from thrust tuple to std tuple. the center of each particle
-// is a thrust::tuple. it is more convenient to use structured binding for unpacking data.
-// since thrust tuple doesn't support c++17 structured binding this very function is used
-template<typename T1, typename T2, typename T3>
-std::tuple<T1, T2, T3> THRUSTtoSTDtuple(thrust::tuple<T1, T2, T3> dev_tuple){
-    return std::make_tuple(thrust::get<0>(dev_tuple), thrust::get<1>(dev_tuple), thrust::get<2>(dev_tuple));
+// straight forward, convert from float3 to std tuple. the center of each particle
+// is a float3. it is more convenient to use structured binding for unpacking data.
+// since float3/double3 doesn't support c++17 structured binding this very function is used
+std::tuple<float, float, float> THRUSTtoSTDtuple(float3 dev_tuple){
+    return std::make_tuple(dev_tuple.x, dev_tuple.y, dev_tuple.z);
 }
 
-template<typename T1, typename T2, typename T3>
-thrust::tuple<T1, T2, T3> STDtoTHRUSTtuple(std::tuple<T1, T2, T3> host_tuple) {
-    return thrust::make_tuple(std::get<0>(host_tuple), std::get<1>(host_tuple), std::get<2>(host_tuple));
+float3 STDtoTHRUSTtuple(std::tuple<float, float, float> host_tuple) {
+    return make_float3(std::get<0>(host_tuple), std::get<1>(host_tuple), std::get<2>(host_tuple));
 }
 
 //! vector algebra
-// thurst tuple operations
+// cuda float3 operations
 // dot product
 __host__ __device__
-float thrust_dot(thrust::tuple<float, float, float> v1, thrust::tuple<float, float, float> v2) {
-    return thrust::get<0>(v1) * thrust::get<0>(v2) +
-           thrust::get<1>(v1) * thrust::get<1>(v2) +
-           thrust::get<2>(v1) * thrust::get<2>(v2);
+float thrust_dot(float3 v1, float3 v2) {
+    return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
 }
 
 float tuple_dot(std::tuple<float, float, float> v1, std::tuple<float, float, float> v2) {
@@ -37,46 +33,39 @@ float tuple_dot(std::tuple<float, float, float> v1, std::tuple<float, float, flo
 
 // cross product
 __host__ __device__
-thrust::tuple<float, float, float> thrust_cross(thrust::tuple<float, float, float> v1, thrust::tuple<float, float, float> v2){
-    return thrust::make_tuple(thrust::get<1>(v1) * thrust::get<2>(v2) - thrust::get<2>(v1) * thrust::get<1>(v2),
-                              thrust::get<2>(v1) * thrust::get<0>(v2) - thrust::get<0>(v1) * thrust::get<2>(v2),
-                              thrust::get<0>(v1) * thrust::get<1>(v2) - thrust::get<1>(v1) * thrust::get<0>(v2));
+float3 thrust_cross(float3 v1, float3 v2){
+    return make_float3(v1.y * v2.z - v1.z * v2.y,
+                       v1.z * v2.x - v1.x * v2.z,
+                       v1.x * v2.y - v1.y * v2.x);
 }
 
 // addition/subrtaction
 __host__ __device__ 
-thrust::tuple<float, float, float> thrust_plus(thrust::tuple<float, float, float> v1, thrust::tuple<float, float, float> v2){
-    return thrust::make_tuple(thrust::get<0>(v1) + thrust::get<0>(v2),
-                              thrust::get<1>(v1) + thrust::get<1>(v2),
-                              thrust::get<2>(v1) + thrust::get<2>(v2));
+float3 thrust_plus(float3 v1, float3 v2){
+    return make_float3(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z);
 }
 
 __host__ __device__ 
-thrust::tuple<float, float, float> thrust_minus(thrust::tuple<float, float, float> v1, thrust::tuple<float, float, float> v2){
-    return thrust::make_tuple(thrust::get<0>(v2) - thrust::get<0>(v1),
-                              thrust::get<1>(v2) - thrust::get<1>(v1),
-                              thrust::get<2>(v2) - thrust::get<2>(v1));
+float3 thrust_minus(float3 v1, float3 v2){
+    return make_float3(v2.x - v1.x, v2.y - v1.y, v2.z - v1.z);
 }
 
 // vector size ||v||_2 = sqrt(vx^2 + vy^2 + vz^2)
 __host__ __device__
-float thrust_L2(thrust::tuple<float, float, float> v) {
-    return sqrtf(thrust::get<0>(v) * thrust::get<0>(v) +
-                 thrust::get<1>(v) * thrust::get<1>(v) +
-                 thrust::get<2>(v) * thrust::get<2>(v));
+float thrust_L2(float3 v) {
+    return sqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
 }
 
 // vector product (r*r^T) - outer product
 __host__ __device__
-thrust::device_vector<float> outerProduct(thrust::tuple<float, float, float> v1,
-                                          thrust::tuple<float, float, float> v2) {
+thrust::device_vector<float> outerProduct(float3 v1, float3 v2) {
     thrust::device_vector<float> res(9);
     // in row major
-    res[0] = thrust::get<0>(v1) * thrust::get<0>(v2); res[1] = thrust::get<0>(v1) * thrust::get<1>(v2);
-    res[2] = thrust::get<0>(v1) * thrust::get<2>(v2); res[3] = thrust::get<1>(v1) * thrust::get<0>(v2);
-    res[4] = thrust::get<1>(v1) * thrust::get<1>(v2); res[5] = thrust::get<1>(v1) * thrust::get<2>(v2);
-    res[6] = thrust::get<2>(v1) * thrust::get<0>(v2); res[7] = thrust::get<2>(v1) * thrust::get<1>(v2);
-    res[8] = thrust::get<2>(v1) * thrust::get<2>(v2);
+    res[0] = v1.x * v2.x; res[1] = v1.x * v2.y;
+    res[2] = v1.x * v2.z; res[3] = v1.y * v2.x;
+    res[4] = v1.y * v2.y; res[5] = v1.y * v2.z;
+    res[6] = v1.z * v2.x; res[7] = v1.z * v2.y;
+    res[8] = v1.z * v2.z;
 
     // return resulting matrix
     return res;
@@ -84,15 +73,15 @@ thrust::device_vector<float> outerProduct(thrust::tuple<float, float, float> v1,
 
 // multiply thrust tuple by a scalar
 __host__ __device__
-void multiply_scalar(const float scalar, thrust::tuple<float, float, float>& v) {
-    thrust::get<0>(v) *= scalar;
-    thrust::get<1>(v) *= scalar;
-    thrust::get<2>(v) *= scalar;
+void multiply_scalar(const float scalar, float3& v) {
+    v.x *= scalar;
+    v.y *= scalar;
+    v.z *= scalar;
 }
 
 // normalize tuple vector
 __host__ __device__
-void normalize_thrust_tuple(thrust::tuple<float, float, float>& v) {
+void normalize_thrust_tuple(float3& v) {
     const float normFactor = 1.0f / thrust_L2(v);
     multiply_scalar(normFactor, v);
 }
@@ -169,20 +158,20 @@ thrust::device_vector<float> inverse_3x3_mat(thrust::device_vector<float> mat) {
 // flatten matrix types to vectors
 // matrix type definition: container of tuples/ other containers
 //! -> container of other containers => container of types
-std::vector<float> flatten_3(std::vector<thrust::tuple<float, float, float>> matrix_type) {
+std::vector<float> flatten_3(std::vector<float3> matrix_type) {
     std::vector<float> res;
     for (auto& tuple_elem : matrix_type) {
-        auto [ex, ey, ez] = THRUSTtoSTDtuple<float, float, float>(tuple_elem);
+        auto [ex, ey, ez] = THRUSTtoSTDtuple(tuple_elem);
         res.push_back(ex); res.push_back(ey); res.push_back(ez);
     }
     return res;
 }
 
 // reverses flattening
-std::vector<thrust::tuple<float, float, float>> deflatten_3(std::vector<float> vector_type) {
-    std::vector<thrust::tuple<float, float, float>> res;
+std::vector<float3> deflatten_3(std::vector<float> vector_type) {
+    std::vector<float3> res;
     for (int i = 0; i < vector_type.size(); i += 3) {
-        res.push_back(thrust::make_tuple(vector_type[i], vector_type[i + 1], vector_type[i + 2]));
+        res.push_back(make_float3(vector_type[i], vector_type[i + 1], vector_type[i + 2]));
     }
     return res;
 }
@@ -199,8 +188,7 @@ specific case for matrix multiplication - A*B^T = |a1|                      |a1b
                                                   |a2|  x [b1 ,b2, b3] =    |a2b1 a2b2 a3b3|   , aibj = dot(ai, bj) 
                                                   |a3|                      |a3b1 a3b2 a3b3|          = aix*bjx + aiy*bjy + aiz*bjz
 */
-auto multiply_3_rTranspose(std::vector<thrust::tuple<float, float, float>> m1,
-                           std::vector<thrust::tuple<float, float, float>> m2) {
+auto multiply_3_rTranspose(std::vector<float3> m1, std::vector<float3> m2) {
 
     std::vector<float> flattenResult;
     for (auto& row1 : m1) {
@@ -217,24 +205,22 @@ auto multiply_3_rTranspose(std::vector<thrust::tuple<float, float, float>> m1,
 }
 
 // change columns to be rows
-std::vector<thrust::tuple<float, float, float>> reorganize_mat3(std::vector<thrust::tuple<float, float, float>> m) {
-    auto [r1x, r1y, r1z] = THRUSTtoSTDtuple<float, float, float>(m[0]); 
-    auto [r2x, r2y, r2z] = THRUSTtoSTDtuple<float, float, float>(m[1]);
-    auto [r3x, r3y, r3z] = THRUSTtoSTDtuple<float, float, float>(m[2]);
-    return { thrust::make_tuple(r1x, r2x, r3x),
-             thrust::make_tuple(r1y, r2y, r3y),
-             thrust::make_tuple(r1z, r2z, r3z) };
+std::vector<float3> reorganize_mat3(std::vector<float3> m) {
+    auto [r1x, r1y, r1z] = THRUSTtoSTDtuple(m[0]); 
+    auto [r2x, r2y, r2z] = THRUSTtoSTDtuple(m[1]);
+    auto [r3x, r3y, r3z] = THRUSTtoSTDtuple(m[2]);
+    return { make_float3(r1x, r2x, r3x),
+             make_float3(r1y, r2y, r3y),
+             make_float3(r1z, r2z, r3z) };
 }
 
 // multiply two tuple matrices
-auto multiply_3(std::vector<thrust::tuple<float, float, float>> m1,
-                std::vector<thrust::tuple<float, float, float>> m2,
-                operation status) {
+auto multiply_3(std::vector<float3> m1, std::vector<float3> m2, operation status) {
 
     // transposed matrices - for different transpose cases - the function reorganizes the matrices
     // in order to be in right transpose format for using the multiply_3_rTranspose function
-    std::vector<thrust::tuple<float, float, float>> transposed1 = reorganize_mat3(m1);
-    std::vector<thrust::tuple<float, float, float>> transposed2 = reorganize_mat3(m2);
+    std::vector<float3> transposed1 = reorganize_mat3(m1);
+    std::vector<float3> transposed2 = reorganize_mat3(m2);
     // calculation of multiplication results using tuple dot - first case : result is all of the combinations
     // of row dot products
     return (status == RIGHT_TRANSPOSE_ONLY) ? multiply_3_rTranspose(m1, m2) :
@@ -286,18 +272,16 @@ float calculatePressureForceMagnitude(float n, float R, float T, float V, geomet
 
 // adjust the spring directions to suit the correct direction of the pressure force - 
 // pushing outward of the body (away from cnter mass)
-struct negateDir : public thrust::unary_function<thrust::tuple<thrust::tuple<float, float, float>, particle>,
-                                                 thrust::tuple<float, float, float>>{
+struct negateDir : public thrust::unary_function<thrust::tuple<float3, particle>, float3>{
 
-    thrust::tuple<float, float, float> r_cm;
+    float3 r_cm;
 
     // constructor for taking the center mass
-    negateDir(const thrust::tuple<float, float, float> _r_cm) : r_cm{ _r_cm } {}
+    negateDir(const float3 _r_cm) : r_cm{ _r_cm } {}
 
     // operator for negating particle movement direction if needed
     __host__ __device__ 
-    thrust::tuple<float, float, float> operator()(
-        thrust::tuple<thrust::tuple<float, float, float>, particle> zip_tuple) {
+    float3 operator()(thrust::tuple<float3, particle> zip_tuple) {
 
         // calculating r_cm - particle.center
         auto dirFromCm = thrust_minus(thrust::get<1>(zip_tuple).center, r_cm);
@@ -310,9 +294,7 @@ struct negateDir : public thrust::unary_function<thrust::tuple<thrust::tuple<flo
 };
 
 // adjust spring direction vectors according to outward direction related to center mass
-void outwardDirAdjust(std::vector<thrust::tuple<float, float, float>>& springDir,
-                      std::vector<particle>& particles,
-                      thrust::tuple<float, float, float> center_mass) {
+void outwardDirAdjust(std::vector<float3>& springDir, std::vector<particle>& particles, float3 center_mass) {
 
     auto zip_iter1 = thrust::make_zip_iterator(thrust::make_tuple(springDir.begin(),
                                                particles.begin()));
@@ -322,52 +304,44 @@ void outwardDirAdjust(std::vector<thrust::tuple<float, float, float>>& springDir
 }
 
 // multiply point array by value
-struct multiplyByScalar : public thrust::unary_function<thrust::tuple<float, float, float>,
-                                                        thrust::tuple<float, float, float>>{
+struct multiplyByScalar : public thrust::unary_function<float3, float3>{
 
     float val;
 
     multiplyByScalar(const float _val) : val{ _val } {}
 
-    __host__ __device__ thrust::tuple<float, float, float> operator()(thrust::tuple<float, float, float> v) {
-        return thrust::make_tuple(thrust::get<0>(v) * val, thrust::get<1>(v) * val, thrust::get<2>(v) * val);
+    __host__ __device__ float3 operator()(float3 v) {
+        return make_float3(v.x * val, v.y * val, v.z * val);
     }
 };
 
 // add two arrays of points together
-struct thrustAdd : public thrust::binary_function<thrust::tuple<float, float, float>,
-                                                  thrust::tuple<float, float, float>,
-                                                  thrust::tuple<float, float, float>>{
+struct thrustAdd : public thrust::binary_function<float3, float3, float3>{
 
     __host__ __device__ 
-    auto operator()(thrust::tuple<float, float, float> v1, thrust::tuple<float, float, float> v2) {
-        return thrust::make_tuple(thrust::get<0>(v1) + thrust::get<0>(v2),
-                                  thrust::get<1>(v1) + thrust::get<1>(v2),
-                                  thrust::get<2>(v1) + thrust::get<2>(v2));
+    float3 operator()(float3 v1, float3 v2) {
+        return thrust_plus(v1, v2);
     }
 };
                                                  
 
 enum Dir{X, Y, Z};
 
-struct DirExtremum : public thrust::binary_function<thrust::tuple<float, float, float>,
-                                                    thrust::tuple<float, float, float>,
-                                                    bool> {
+struct DirExtremum : public thrust::binary_function<float3, float3, bool> {
     Dir direction;
 
     // constructor for initializing direction choice
     DirExtremum(const Dir dir) : direction{ dir } {}
 
-    __host__ __device__ bool operator()(thrust::tuple<float, float, float> p1,
-                                        thrust::tuple<float, float, float> p2) {
+    __host__ __device__ bool operator()(float3 p1, float3 p2) {
 
-        if (direction == X) return thrust::get<0>(p1) > thrust::get<0>(p2);
-        else if (direction == Y) return thrust::get<1>(p1) > thrust::get<1>(p2);
-        else return thrust::get<2>(p1) > thrust::get<2>(p2);
+        if (direction == X) return p1.x > p2.x;
+        else if (direction == Y) return p1.y > p2.y;
+        else return p1.z > p2.z;
     }
 };
 
-std::tuple<float, float, float> findBoxDimensions(const std::vector<thrust::tuple<float, float, float>> box){
+std::tuple<float, float, float> findBoxDimensions(const std::vector<float3> box){
     // x dimension
     auto max_x = thrust_wrapper_max_element(true, box.begin(), box.end(), DirExtremum(X));
     auto min_x = thrust_wrapper_min_element(true, box.begin(), box.end(), DirExtremum(X));
@@ -378,10 +352,28 @@ std::tuple<float, float, float> findBoxDimensions(const std::vector<thrust::tupl
     auto max_z = thrust_wrapper_max_element(true, box.begin(), box.end(), DirExtremum(Z));
     auto min_z = thrust_wrapper_min_element(true, box.begin(), box.end(), DirExtremum(Z));
     // return the lengths
-    return std::make_tuple(thrust::get<0>(*max_x) - thrust::get<0>(*min_x),
-                           thrust::get<1>(*max_y) - thrust::get<1>(*min_y),
-                           thrust::get<2>(*max_z) - thrust::get<2>(*min_z));
+    return std::make_tuple((*max_x).x - (*min_x).x,
+                           (*max_y).y - (*min_y).y,
+                           (*max_z).z - (*min_z).z);
 }
+
+// project external Force exF applied on each particle onto the spring direction spD
+// this limits inner particles movement only to the spring direction.
+// input - zip iterator of external force distribution and spring directions for each particle
+// output - zip iterator of the data of the external force vector<float>
+// the output zip iterator : zip_iterator(thrust::tuple<vec, vec + N/3, vec + 2N/3>) therefore the 
+// kernel runs N times - N is the number of particles.
+struct vectorProjection : public thrust::unary_function<thrust::tuple<float3, float3>,
+    thrust::tuple<float, float, float>>{
+
+    __host__ __device__
+        thrust::tuple<float, float, float> operator()(thrust::tuple<float3, float3> forceDirs) {
+        float3 exF = thrust::get<0>(forceDirs); float3 spD = thrust::get<1>(forceDirs);
+        return thrust::make_tuple(thrust_dot(exF, spD) * spD.x / thrust_L2(spD),
+            thrust_dot(exF, spD) * spD.y / thrust_L2(spD),
+            thrust_dot(exF, spD) * spD.z / thrust_L2(spD));
+    }
+};
 
 /*
 -----------------------------------------------------------
@@ -395,7 +387,7 @@ void rigid_body::initSpringDirection() {
     // systemSize = particleSize = particles.size()
     // rows
     for (int i = 0; i < 3 * systemSize; i += 3) {
-        rigidState[SPRING_DIRECTION].push_back(thrust::make_tuple(0.0f, 0.0f, 0.0f));
+        rigidState[SPRING_DIRECTION].push_back(make_float3(0.0f, 0.0f, 0.0f));
         // columns
         for (int j = 0; j < 3 * systemSize; j += 3) {
             if (DampingMatrix.data[3 * systemSize * j + i]) {
@@ -416,23 +408,23 @@ void rigid_body::initSpringDirection() {
 void rigid_body::initForceDistribution(){
     // reset all initial forces on all particles to be gravity (uniform distribution) 
     for(auto& elem : particles){
-        rigidState[FORCE_DISTRIBUTION].push_back(thrust::make_tuple(0.0f, 0.0f, -elem.mass * G));
+        rigidState[FORCE_DISTRIBUTION].push_back(make_float3(0.0f, 0.0f, -elem.mass * G));
     }
 }
 
 // done after loading the model data into particles array
 void rigid_body::initCenterMass(){
     // center mass is 3 size vector
-    rigidState[CENTER_MASS] = { thrust::make_tuple(0.0f, 0.0f, 0.0f) };
+    rigidState[CENTER_MASS] = { make_float3(0.0f, 0.0f, 0.0f) };
     for(auto& particle : particles){
         // uniform distribution initialization
         particle.mass = mass / (float)particles.size();
         // get particle center mass 
-        auto [x, y, z] = THRUSTtoSTDtuple<float, float, float>(particle.center);
+        auto [x, y, z] = THRUSTtoSTDtuple(particle.center);
         // same as adding coordinate/particles.size() 
-        thrust::get<0>(rigidState[CENTER_MASS][0]) +=  x * particle.mass / mass;
-        thrust::get<1>(rigidState[CENTER_MASS][0]) +=  y * particle.mass / mass;
-        thrust::get<2>(rigidState[CENTER_MASS][0]) +=  z * particle.mass / mass;
+        (rigidState[CENTER_MASS][0]).x +=  x * particle.mass / mass;
+        (rigidState[CENTER_MASS][0]).y +=  y * particle.mass / mass;
+        (rigidState[CENTER_MASS][0]).z +=  z * particle.mass / mass;
     }
 }
 
@@ -440,15 +432,15 @@ void rigid_body::initCenterMass(){
 void rigid_body::initRelativeDistances() {
     for (auto& p : particles) {
         // get elem data
-        auto [x, y, z] = THRUSTtoSTDtuple<float, float, float>(p.center);
-        auto [cx, cy, cz] = THRUSTtoSTDtuple<float, float, float>(rigidState[CENTER_MASS][0]);
-        relativeParticles.push_back({ thrust::make_tuple(x - cx, y - cy, z - cz), p.radius, p.mass });
+        auto [x, y, z] = THRUSTtoSTDtuple(p.center);
+        auto [cx, cy, cz] = THRUSTtoSTDtuple(rigidState[CENTER_MASS][0]);
+        relativeParticles.push_back({ make_float3(x - cx, y - cy, z - cz), p.radius, p.mass });
     }
 }
 
 // initialize linear velocity vector - of center mass
 void rigid_body::initLinearVelocity() {
-    rigidState[LINEAR_VELOCITY] = { thrust::make_tuple(0.0f, 0.0f, 0.0f) };
+    rigidState[LINEAR_VELOCITY] = { make_float3(0.0f, 0.0f, 0.0f) };
 }
 
 /*
@@ -456,9 +448,9 @@ gereral rotation breaks down into multiplication of rotations on all directions:
 R = R_x * R_y * R_z = Ix * Iy * Iz = I
 */
 void rigid_body::initRotation(){
-    rigidState[ROTATION] = { thrust::make_tuple(1.0f, 0.0f, 0.0f),
-                             thrust::make_tuple(0.0f, 1.0f, 0.0f),
-                             thrust::make_tuple(0.0f, 0.0f, 1.0f) };
+    rigidState[ROTATION] = { make_float3(1.0f, 0.0f, 0.0f),
+                             make_float3(0.0f, 1.0f, 0.0f),
+                             make_float3(0.0f, 0.0f, 1.0f) };
 }
 
 /*
@@ -469,31 +461,25 @@ void rigid_body::initLinearMomentum(){
 
 // L_init = (0,0,0)
 void rigid_body::initAngularMomentum(){
-    rigidState[ANGULAR_MOMENTUM] = { thrust::make_tuple(0.0f, 0.0f, 0.0f) };
+    rigidState[ANGULAR_MOMENTUM] = { make_float3(0.0f, 0.0f, 0.0f) };
 }
 
 void rigid_body::initTotalExternalForce() {
-    rigidState[TOTAL_EXTERNAL_FORCE] = { thrust::make_tuple(0.0f, 0.0f, 0.0f) };
-    for (auto& f : rigidState[FORCE_DISTRIBUTION]) {
-        auto [x, y, z] = THRUSTtoSTDtuple<float, float, float>(f);
-        thrust::get<0>(rigidState[TOTAL_EXTERNAL_FORCE][0]) += x;
-        thrust::get<1>(rigidState[TOTAL_EXTERNAL_FORCE][0]) += y;
-        thrust::get<2>(rigidState[TOTAL_EXTERNAL_FORCE][0]) += z;
-    }
+    rigidState[TOTAL_EXTERNAL_FORCE] = { make_float3(0.0f, 0.0f, -mass * G) };
 }
 
 // initial torque is corresponding to inital force - gravity
 void rigid_body::initTorque(){
-    rigidState[TORQUE] = { thrust::make_tuple(0.0f, 0.0f, 0.0f) };
+    rigidState[TORQUE] = { make_float3(0.0f, 0.0f, 0.0f) };
     for(auto& particle : relativeParticles){
         // get particle centers and force on particular particle
-        auto [p_x, p_y, p_z] = THRUSTtoSTDtuple<float, float, float>(particle.center);
+        auto [p_x, p_y, p_z] = THRUSTtoSTDtuple(particle.center);
 
         // accumulate torque elements - Ti = cross(ri, fi), 
         // in init the only force applied is gravity, hence fi = (0, 0, -G*mi).
         // since the cross product yields results perpendicular to the force, the z torque is 0
-        thrust::get<0>(rigidState[TORQUE][0]) -= p_y * G * particle.mass;
-        thrust::get<1>(rigidState[TORQUE][0]) += p_x * G * particle.mass;
+        (rigidState[TORQUE][0]).x -= p_y * G * particle.mass;
+        (rigidState[TORQUE][0]).y += p_x * G * particle.mass;
     }
 }
 
@@ -509,9 +495,9 @@ void rigid_body::initInverseInertiaTensor(){
     // calculate the inverse matrix
     auto invI = inverse_3x3_mat(inertiaMatrix);
     // get the inverse matrix to the bodyState mapping
-    rigidState[INVERSE_INERTIA_TENSOR] = { thrust::make_tuple(invI[0], invI[1], invI[2]),
-                                           thrust::make_tuple(invI[3], invI[4], invI[5]),
-                                           thrust::make_tuple(invI[6], invI[7], invI[8]) };
+    rigidState[INVERSE_INERTIA_TENSOR] = { make_float3(invI[0], invI[1], invI[2]),
+                                           make_float3(invI[3], invI[4], invI[5]),
+                                           make_float3(invI[6], invI[7], invI[8]) };
     //! get invariant body inverse inertia tensor - the inertia tensor is changes only via rotations!
     //! this is the same as the body inertia tensor in world coordinates if the initial rotation is the IDENTITY
     //! which the simulation resets to be.
@@ -519,7 +505,7 @@ void rigid_body::initInverseInertiaTensor(){
 }
 
 void rigid_body::initAngularVelocity() {
-    rigidState[ANGULAR_VELOCITY] = { thrust::make_tuple(0.0f, 0.0f, 0.0f) };
+    rigidState[ANGULAR_VELOCITY] = { make_float3(0.0f, 0.0f, 0.0f) };
 }
 
 void rigid_body::initDampingMatrix() {
@@ -568,8 +554,8 @@ void rigid_body::calculateBodyVolume() {
 
 void rigid_body::calculatePressureForce(){
     float magnitude = calculatePressureForceMagnitude(n, R, T, V_approx, bodySurface);
-    thrust::device_vector<thrust::tuple<float, float, float>> res(rigidState[SPRING_DIRECTION].begin(),
-                                                                  rigidState[SPRING_DIRECTION].end());
+    thrust::device_vector<float3> res(rigidState[SPRING_DIRECTION].begin(),
+                                      rigidState[SPRING_DIRECTION].end());
     thrust_wrapper_transform(true, res.begin(), res.end(), res.begin(), multiplyByScalar(magnitude));
     // add the result force distribution to force distribution
     thrust_wrapper_transform(true, res.begin(), res.end(), rigidState[FORCE_DISTRIBUTION].begin(),
@@ -579,18 +565,18 @@ void rigid_body::calculatePressureForce(){
 
 // r_cm_n+1 = r_cm_n + dt*vx_n
 void rigid_body::calculateCenterMass() {
-    auto [cx, cy, cz] = THRUSTtoSTDtuple<float, float, float>(rigidState[CENTER_MASS][0]);
-    auto [vx, vy, vz] = THRUSTtoSTDtuple<float, float, float>(rigidState[LINEAR_VELOCITY][0]);
-    rigidState[CENTER_MASS][0] = thrust::make_tuple(cx + dt * vx, cy + dt * vy, cz + dt * vz);
+    auto [cx, cy, cz] = THRUSTtoSTDtuple(rigidState[CENTER_MASS][0]);
+    auto [vx, vy, vz] = THRUSTtoSTDtuple(rigidState[LINEAR_VELOCITY][0]);
+    rigidState[CENTER_MASS][0] = make_float3(cx + dt * vx, cy + dt * vy, cz + dt * vz);
 }
 
 // v_n+1 = v_n + dt*a_n = v_n + dt*f_n/m
 void rigid_body::calculateLinearVelocity() {
-    auto [vx, vy, vz] = THRUSTtoSTDtuple<float, float, float>(rigidState[LINEAR_VELOCITY][0]);
-    auto [fx, fy, fz] = THRUSTtoSTDtuple<float, float, float>(rigidState[TOTAL_EXTERNAL_FORCE][0]);
-    rigidState[LINEAR_VELOCITY][0] = thrust::make_tuple(vx + dt * fx / mass,
-                                                        vy + dt * fy / mass,
-                                                        vz + dt * fz / mass);
+    auto [vx, vy, vz] = THRUSTtoSTDtuple(rigidState[LINEAR_VELOCITY][0]);
+    auto [fx, fy, fz] = THRUSTtoSTDtuple(rigidState[TOTAL_EXTERNAL_FORCE][0]);
+    rigidState[LINEAR_VELOCITY][0] = make_float3(vx + dt * fx / mass,
+                                                 vy + dt * fy / mass,
+                                                 vz + dt * fz / mass);
 }
 
 /*
@@ -599,7 +585,7 @@ R_n -> q_n -> q_n+1 = q_n + DT/2 w_n*q_n -> R_n+1
 */
 void rigid_body::calculateRotation(){
     // represent angular velocity as a quaternion
-    auto [wx, wy, wz] = THRUSTtoSTDtuple<float, float, float>(rigidState[ANGULAR_VELOCITY][0]);
+    auto [wx, wy, wz] = THRUSTtoSTDtuple(rigidState[ANGULAR_VELOCITY][0]);
     std::valarray<float> w_vector = { wx, wy, wz };
     quaternion w(0.0f, w_vector); 
     // represent rotation matrix as a quaternion
@@ -613,9 +599,9 @@ void rigid_body::calculateRotation(){
 }
 
 void rigid_body::calculateAngularMomentum() {
-    auto [tx, ty, tz] = THRUSTtoSTDtuple<float, float, float>(rigidState[TORQUE][0]);
-    auto [Lx, Ly, Lz] = THRUSTtoSTDtuple<float, float, float>(rigidState[ANGULAR_MOMENTUM][0]);
-    rigidState[ANGULAR_MOMENTUM][0] = thrust::make_tuple(Lx + dt * tx, Ly + dt * ty, Lz + dt * tz);
+    auto [tx, ty, tz] = THRUSTtoSTDtuple(rigidState[TORQUE][0]);
+    auto [Lx, Ly, Lz] = THRUSTtoSTDtuple(rigidState[ANGULAR_MOMENTUM][0]);
+    rigidState[ANGULAR_MOMENTUM][0] = make_float3(Lx + dt * tx, Ly + dt * ty, Lz + dt * tz);
 }
 
 void rigid_body::calculateForceDistribution() {
@@ -641,12 +627,28 @@ void rigid_body::calculateInverseInertiaTensor() {
 
 // w_n+1 = (I_n+1)^-1 * L_n+1
 void rigid_body::calculateAngularVelocity() {
-    thrust::get<0>(rigidState[ANGULAR_VELOCITY][0]) = thrust_dot(rigidState[INVERSE_INERTIA_TENSOR][0],
-                                                                 rigidState[ANGULAR_MOMENTUM][0]);
-    thrust::get<1>(rigidState[ANGULAR_VELOCITY][0]) = thrust_dot(rigidState[INVERSE_INERTIA_TENSOR][1],
-                                                                 rigidState[ANGULAR_MOMENTUM][0]);
-    thrust::get<2>(rigidState[ANGULAR_VELOCITY][0]) = thrust_dot(rigidState[INVERSE_INERTIA_TENSOR][2],
-                                                                 rigidState[ANGULAR_MOMENTUM][0]);
+    (rigidState[ANGULAR_VELOCITY][0]).x = thrust_dot(rigidState[INVERSE_INERTIA_TENSOR][0],
+                                                     rigidState[ANGULAR_MOMENTUM][0]);
+    (rigidState[ANGULAR_VELOCITY][0]).y = thrust_dot(rigidState[INVERSE_INERTIA_TENSOR][1],
+                                                     rigidState[ANGULAR_MOMENTUM][0]);
+    (rigidState[ANGULAR_VELOCITY][0]).z = thrust_dot(rigidState[INVERSE_INERTIA_TENSOR][2],
+                                                     rigidState[ANGULAR_MOMENTUM][0]);
+}
+
+vector<float> rigid_body::decomposeExternalForces() {
+    vector<float> externalForce(3 * systemSize, 1, memLocation::DEVICE);
+    // begining operator - consisting of the begining of the external force array and spring direction
+    auto zipExtForceB = thrust::make_zip_iterator(thrust::make_tuple(rigidState[FORCE_DISTRIBUTION].begin(),
+                                                                     rigidState[SPRING_DIRECTION].begin()));
+    // end operator
+    auto zipExtForceE = thrust::make_zip_iterator(thrust::make_tuple(rigidState[FORCE_DISTRIBUTION].begin(),
+                                                                     rigidState[SPRING_DIRECTION].begin()));
+    // result tuple - flattened
+    auto zipExtForceR = thrust::make_zip_iterator(thrust::make_tuple(externalForce.data,
+                                                                     externalForce.data + systemSize,
+                                                                     externalForce.data + 2 * systemSize)); 
+
+    thrust_wrapper_transform(true, zipExtForceB, zipExtForceE, zipExtForceR, vectorProjection());                                                                
 }
 
 /*
@@ -654,13 +656,13 @@ equation :
 (Mh + Kd - Ks) * Q_t = Mh * (2Q_(t-dt) - Q_(t-2dt)) - N * Ftotal_t
 */
 void rigid_body::updateDisplacementVector() {
-    LinearSolver<float> solver(CHOL, true);
+    auto F = decomposeExternalForces();
     auto lhsMat = infMassDistrib + DampingDistribMatrix - DampingMatrix;
     // for sparse equation
     Sparse_mat<float> lhs_sparse(lhsMat.M, lhsMat.N, lhsMat.memState);
     lhs_sparse.copyData(lhsMat); lhs_sparse.createCSR();
     // TODO : add the calculation with the total external force
-    vector<float> rhsVec = infMassDistrib % (Displacement_t_dt + Displacement_t_dt - Displacement_t_2dt);
+    vector<float> rhsVec = infMassDistrib % (Displacement_t_dt + Displacement_t_dt - Displacement_t_2dt) - F;
     // feed to solver
     solver.I_matrix(lhs_sparse); solver.I_vector(rhsVec); 
     // transfer old data to displacement in times t-dt, t-2dt before calculating solution
@@ -692,7 +694,6 @@ void rigid_body::advance() {
     calculateTotalExternalForce();
     calculateTorque();
     // soft body data
-    decomposeExternalForces();
     updateDisplacementVector();
     getOuterSurfaceDeformation();
     // updata the body position - all of particle position changes
