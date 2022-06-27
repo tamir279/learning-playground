@@ -8,6 +8,8 @@
 #include "thrustWrappers.cuh"
 #include "accLinAlg.cuh"
 
+// TODO : change the data type in quaternion math to be a float3!!!!!!!
+
 // gravitational acceleration
 const float G = 9.81;
 
@@ -189,7 +191,7 @@ private:
     // internal particle model calculations - for the NEXT step!
     void getDampingMatrix();
     void updateDisplacementVector();
-    void decomposeExternalForces();
+    vector<float> decomposeExternalForces();
     void getOuterSurfaceDeformation();
     // get the sum of all changes in place - linear + angular + inner - and update particle center positions
     void updatePosition();

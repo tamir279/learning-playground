@@ -8,6 +8,8 @@
 #include <thrust/device_ptr.h>
 #include <thrust/sequence.h>
 #include <thrust/iterator/transform_iterator.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/permutation_iterator.h>
 #include <thrust/remove.h>
 #include <thrust/fill.h>
 #include <thrust/iterator/zip_iterator.h>
@@ -362,3 +364,58 @@ __host__ __device__ void thrust_wrapper_tabulate(
 	}
 	else thrust::tabulate(thrust::host, first, last, unaryOperator);
 }
+
+/*
+-------------------------------------------------------------------------------------------------------
+----------------------------- THRUST STRIDED ITERATOR CLASS + ZIP_ITERATOR ----------------------------
+-------------------------------------------------------------------------------------------------------
+*/
+
+template<typename iterator>
+class strided_iterator{
+public:
+
+	typedef thrust::iterator_difference<iterator>::type diff_type;
+
+
+	strided_iterator(iterator _first, iterator _last, diff_type _stride) : 
+		first{ _first }, last{ _last }, stride{ _stride }{}
+
+	// functor for getting the advancement in idices needed to be able to define strided
+	// scanning of thrust algorithms
+	struct stride_functor : public thrust::unary_function<diff_type, diff_type>
+	{
+		diff_type stride;
+
+		stride_functor(diff_type _stride) : stride{ _stride } {}
+
+		__host__ __device__
+			diff_type operator()(const diff_type& i) const
+		{
+			return stride * i;
+		}
+	};
+
+	// smart idea which is not mine (obviously...) 
+	// from : https://github.com/NVIDIA/thrust/blob/master/examples/strided_range.cu
+	// conting iterator - incriments indices from begin() by 1 : arr.begin(), arr.begin() + 1, arr.begin() + 2, ...
+	typedef typename thrust::counting_iterator<diff_type> CountingIterator;
+	// transform iterator - trnasforms the counting iterator by multiplying the incriments by stride
+	// => iterator index increases by stride
+	typedef typename thrust::transform_iterator<stride_functor, CountingIterator> TransformIterator;
+	// permutation iterator - returns iterator.begin() + stride or array[transformiterator(counting iterator(0), stride)]
+	typedef typename thrust::permutation_iterator<iterator, TransformIterator> PermutationIterator;
+
+	PermutationIterator begin() const {
+		return PermutationIterator(first, TransformIterator(CountingIterator(0), stride_functor(stride)));
+	}
+
+	PermutationIterator end() const {
+		return begin() + ((last - first) + (stride - 1)) / stride;
+	}
+
+protected:
+	iterator first;
+	iterator last;
+	diff_type stride;
+};

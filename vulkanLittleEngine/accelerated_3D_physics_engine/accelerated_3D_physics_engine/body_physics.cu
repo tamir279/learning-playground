@@ -367,7 +367,7 @@ struct vectorProjection : public thrust::unary_function<thrust::tuple<float3, fl
     thrust::tuple<float, float, float>>{
 
     __host__ __device__
-        thrust::tuple<float, float, float> operator()(thrust::tuple<float3, float3> forceDirs) {
+    thrust::tuple<float, float, float> operator()(thrust::tuple<float3, float3> forceDirs) {
         float3 exF = thrust::get<0>(forceDirs); float3 spD = thrust::get<1>(forceDirs);
         return thrust::make_tuple(thrust_dot(exF, spD) * spD.x / thrust_L2(spD),
             thrust_dot(exF, spD) * spD.y / thrust_L2(spD),
@@ -375,6 +375,19 @@ struct vectorProjection : public thrust::unary_function<thrust::tuple<float3, fl
     }
 };
 
+struct RotAndTranslate : public thrust::binary_function<particle, 
+                                                        thrust::tuple<float, float, float>, particle> {
+
+    float3 cm;
+    quaternion rot;
+
+    RotAndTranslate(const float3 _cm, const quaternion _rot) : cm{ _cm }, rot{ _rot }{}
+
+    __host__ __device__
+    particle operator()(particle currentPosition, thrust::tuple<float, float, float> fluctuations) {
+
+    }
+};
 /*
 -----------------------------------------------------------
 -------------------- library functions --------------------
@@ -556,9 +569,11 @@ void rigid_body::calculatePressureForce(){
     float magnitude = calculatePressureForceMagnitude(n, R, T, V_approx, bodySurface);
     thrust::device_vector<float3> res(rigidState[SPRING_DIRECTION].begin(),
                                       rigidState[SPRING_DIRECTION].end());
-    thrust_wrapper_transform(true, res.begin(), res.end(), res.begin(), multiplyByScalar(magnitude));
+    // multiply the spring directions by the pressure force magnitude
+    auto first = thrust::make_transform_iterator(res.begin(), multiplyByScalar(magnitude));
+    auto last = thrust::make_transform_iterator(res.end(), multiplyByScalar(magnitude));
     // add the result force distribution to force distribution
-    thrust_wrapper_transform(true, res.begin(), res.end(), rigidState[FORCE_DISTRIBUTION].begin(),
+    thrust_wrapper_transform(true, first, last, rigidState[FORCE_DISTRIBUTION].begin(),
                              rigidState[FORCE_DISTRIBUTION].end(), rigidState[FORCE_DISTRIBUTION].begin(),
                              thrustAdd());
 }
@@ -643,12 +658,15 @@ vector<float> rigid_body::decomposeExternalForces() {
     // end operator
     auto zipExtForceE = thrust::make_zip_iterator(thrust::make_tuple(rigidState[FORCE_DISTRIBUTION].begin(),
                                                                      rigidState[SPRING_DIRECTION].begin()));
-    // result tuple - flattened
-    auto zipExtForceR = thrust::make_zip_iterator(thrust::make_tuple(externalForce.data,
-                                                                     externalForce.data + systemSize,
-                                                                     externalForce.data + 2 * systemSize)); 
+    // result tuple - flattened, stride is 3 - size of a single 3D point...                                           
+    auto x_data = strided_iterator<float*>(externalForce.data, externalForce.data + 3 * systemSize - 2, 3);
+    auto y_data = strided_iterator<float*>(externalForce.data + 1, externalForce.data + 3 * systemSize - 1, 3);
+    auto z_data = strided_iterator<float*>(externalForce.data + 2, externalForce.data + 3 * systemSize, 3);
+    // create a zip iterator
+    auto zipExtForceR = thrust::make_zip_iterator(thrust::make_tuple(x_data, y_data, z_data));
 
-    thrust_wrapper_transform(true, zipExtForceB, zipExtForceE, zipExtForceR, vectorProjection());                                                                
+    thrust_wrapper_transform(true, zipExtForceB, zipExtForceE, zipExtForceR, vectorProjection()); 
+    return externalForce;                                                               
 }
 
 /*
@@ -678,7 +696,7 @@ r_total = r_cm + q_r*r0*q_r^-1 + dr, dr = Q_t[i]
  r_total_rel = r_total - r_cm
 */
 void rigid_body::updatePosition() {
-
+    
 }
 
 void rigid_body::advance() {
