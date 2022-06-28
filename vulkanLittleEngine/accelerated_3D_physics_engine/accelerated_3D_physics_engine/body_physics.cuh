@@ -8,8 +8,6 @@
 #include "thrustWrappers.cuh"
 #include "accLinAlg.cuh"
 
-// TODO : change the data type in quaternion math to be a float3!!!!!!!
-
 // gravitational acceleration
 const float G = 9.81;
 

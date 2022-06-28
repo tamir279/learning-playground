@@ -2,40 +2,48 @@
 
 // basic vector operations
 // dot product
-float dot(std::valarray<float> v1, std::valarray<float> v2){
-	return (v1 * v2).sum();
+float dot(float3 v1, float3 v2){
+	return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
 }
 
 // cross product
-std::valarray<float> cross(std::valarray<float> v1, std::valarray<float> v2){
-	return { v1[1] * v2[2] - v2[1] * v1[2], v2[0] * v1[2] - v1[1] * v2[2], v1[0] * v2[1] - v2[0] * v1[1] };
+float3 cross(float3 v1, float3 v2){
+	return make_float3(v1.y * v2.z - v2.y * v1.z, v2.x * v1.z - v1.y * v2.z, v1.x * v2.y - v2.x * v1.y);
 }
 
 // library functions
 
+quaternion& quaternion::operator=(const quaternion& q){
+	s = q.s;
+	vector.x = q.vector.x; 
+	vector.y = q.vector.y;
+	vector.z = q.vector.z;
+	return *this;
+}
+
 void quaternion::operator+=(const quaternion& q) {
 	s += q.s;
-	vector += q.vector;
+	vector.x += q.vector.x; 
+	vector.y += q.vector.y;
+	vector.z += q.vector.z;
 }
 
 quaternion quaternion::operator+(const quaternion& q) {
 	quaternion q_res;
-	q_res.s = s + q.s;
-	q_res.vector = vector + q.vector;
-
+	q_res += q;
 	return q_res;
 }
 
 void quaternion::operator-=(const quaternion& q) {
 	s -= q.s;
-	vector -= q.vector;
+	vector.x -= q.vector.x; 
+	vector.y -= q.vector.y;
+	vector.z -= q.vector.z;
 }
 
 quaternion  quaternion::operator-(const quaternion& q) {
 	quaternion q_res;
-	q_res.s = s - q.s;
-	q_res.vector = vector - q.vector;
-
+	q_res -= q;
 	return q_res;
 }
 
@@ -47,7 +55,10 @@ quat = [s, vector], q = [s', vector']
 */
 void quaternion::operator*=(const quaternion& q) {
 	s = s * q.s - dot(vector, q.vector);
-	vector = q.vector * s + vector * q.s + cross(vector, q.vector);
+	float3 cross_prod = cross(vector, q.vector);
+	vector.x = q.vector.x * s + vector.x * q.s + cross_prod.x;
+	vector.y = q.vector.y * s + vector.y * q.s + cross_prod.y;
+	vector.z = q.vector.z * s + vector.z * q.s + cross_prod.z;
 }
 
 /*
@@ -55,23 +66,19 @@ res = quat * q
 */
 quaternion quaternion::operator*(const quaternion& q) {
 	quaternion q_res;
-	q_res.s = s * q.s - dot(vector, q.vector);
-	q_res.vector = q.vector * s + vector * q.s + cross(vector, q.vector);
-
+	q_res *= q;
 	return q_res;
 }
 
 // scalar multiplication
 void quaternion::operator*=(const float scale) {
 	s *= scale;
-	vector *= scale;
+	vector.x *= scale; vector.y *= scale; vector.z *= scale;
 }
 
 quaternion quaternion::operator*(const float scale) {
 	quaternion q_res;
-	q_res.s = s * scale;
-	q_res.vector = vector * scale;
-
+	q_res *= scale;
 	return q_res;
 }
 
@@ -79,7 +86,9 @@ quaternion quaternion::operator*(const float scale) {
 quaternion operator*(const float scale, const quaternion& q) {
 	quaternion q_res;
 	q_res.s = q.s * scale;
-	q_res.vector = q.vector * scale;
+	q_res.vector.x = q.vector.x * scale;
+	q_res.vector.y = q.vector.y * scale;
+	q_res.vector.z = q.vector.z * scale;
 	return q_res;
 }
 
@@ -118,22 +127,19 @@ void quaternion::Normalize() {
 	}
 
 	// calculating components
-	s /= Norm();
-	vector *= 1.0f / Norm();
+	*this *= 1.0f / Norm();
 }
 
 /*
 q* = [s, -v]
 */
 void quaternion::conjugate() {
-	vector *= -1.0f;
+	vector.x *= -1.0f; vector.y *= -1.0f; vector.z *= -1.0f;
 }
 
 quaternion quaternion::Conjugate() {
-	quaternion q_conjugate;
-	q_conjugate.s = s;
-	q_conjugate.vector = vector * (-1.0f);
-
+	quaternion q_conjugate = *this;
+	q_conjugate.conjugate();
 	return q_conjugate;
 }
 
@@ -145,7 +151,6 @@ quaternion quaternion::inverse() {
 	float norm = q_inverse.Norm();
 	q_inverse.Normalize();
 	q_inverse *= 1.0f / norm;
-
 	return q_inverse;
 }
 
@@ -161,7 +166,9 @@ q_unit = [cos(o/2), sin(o/2)v']
 void quaternion::convertToRotationQuaternionRepresentation() {
 	float rotationAngle = DegreesToRadians(s);
 	s = std::cosf(rotationAngle / 2);
-	vector *= std::sinf(rotationAngle / 2) / fastSquareRoot(dot(vector, vector));
+	vector.x *= std::sinf(rotationAngle / 2) / fastSquareRoot(dot(vector, vector));
+	vector.y *= std::sinf(rotationAngle / 2) / fastSquareRoot(dot(vector, vector));
+	vector.z *= std::sinf(rotationAngle / 2) / fastSquareRoot(dot(vector, vector));
 }
 
 /*
@@ -175,7 +182,7 @@ q = s + v-> R = |1 - 2 * (vy * vy + vz * vz)   2 * (vx * vy - s * vz)   2 * (vx 
 */
 std::vector<float> quaternion::getRotationMatrixFromUnitQuaternion(){
 	// get vector
-	float vx = vector[0]; float vy = vector[1]; float vz = vector[2];
+	float vx = vector.x; float vy = vector.y; float vz = vector.z;
 
 	// return the matrix as a vector;
 	return {1 - 2 * (vy * vy + vz * vz), 2 * (vx * vy - s * vz), 2 * (vx * vz + s * vy),
@@ -196,26 +203,26 @@ void quaternion::createUnitQuarenion(std::vector<float> rmat){
 	float trace = rmat[0] + rmat[4] + rmat[8];
 	if(trace > 0){
 		s = 0.5f * fastSquareRoot(1.0f + trace);
-		vector[0] = (rmat[7] - rmat[5]) / (4 * s);
-		vector[1] = (rmat[2] - rmat[6]) / (4 * s);
-		vector[2] = (rmat[3] - rmat[1]) / (4 * s);
+		vector.x = (rmat[7] - rmat[5]) / (4 * s);
+		vector.y = (rmat[2] - rmat[6]) / (4 * s);
+		vector.y = (rmat[3] - rmat[1]) / (4 * s);
 	}
 	else if(rmat[0] > rmat[4] && rmat[0] > rmat[8]){
-		vector[0] = 0.5f * fastSquareRoot(1.0f + rmat[0] - rmat[4] - rmat[8]);
-		s = (rmat[7] - rmat[5]) / (4 * vector[0]);
-		vector[1] = (rmat[3] + rmat[1]) / (4 * vector[0]);
-		vector[2] = (rmat[2] + rmat[6]) / (4 * vector[0]);
+		vector.x = 0.5f * fastSquareRoot(1.0f + rmat[0] - rmat[4] - rmat[8]);
+		s = (rmat[7] - rmat[5]) / (4 * vector.x);
+		vector.y = (rmat[3] + rmat[1]) / (4 * vector.x);
+		vector.z = (rmat[2] + rmat[6]) / (4 * vector.x);
 	}
 	else if(rmat[4] > rmat[8]){
-		vector[1] = 0.5f * fastSquareRoot(1.0f + rmat[4] - rmat[0] - rmat[8]);
-		s = (rmat[2] - rmat[6]) / (4 * vector[1]);
-		vector[0] = (rmat[3] + rmat[1]) / (4 * vector[1]);
-		vector[2] = (rmat[7] + rmat[5]) / (4 * vector[1]);
+		vector.y = 0.5f * fastSquareRoot(1.0f + rmat[4] - rmat[0] - rmat[8]);
+		s = (rmat[2] - rmat[6]) / (4 * vector.y);
+		vector.x = (rmat[3] + rmat[1]) / (4 * vector.y);
+		vector.z = (rmat[7] + rmat[5]) / (4 * vector.y);
 	}
 	else{
-		vector[2] = 0.5f * fastSquareRoot(1.0f + rmat[8] - rmat[0] - rmat[4]);
-		s = (rmat[3] - rmat[1]) / (4 * vector[2]);
-		vector[0] = (rmat[2] + rmat[6]) / (4 * vector[2]);
-		vector[1] = (rmat[7] + rmat[5]) / (4 * vector[2]);
+		vector.z = 0.5f * fastSquareRoot(1.0f + rmat[8] - rmat[0] - rmat[4]);
+		s = (rmat[3] - rmat[1]) / (4 * vector.z);
+		vector.x = (rmat[2] + rmat[6]) / (4 * vector.z);
+		vector.y = (rmat[7] + rmat[5]) / (4 * vector.z);
 	}
 }

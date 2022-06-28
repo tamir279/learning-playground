@@ -1,6 +1,8 @@
 #pragma once
 #include <valarray>
 #include <stdexcept>
+#include <cuda.h>
+#include <cuda_runtime.h>
 #include <vector>
 #include <cmath>
 
@@ -12,17 +14,28 @@ public:
 
 	// rotation + vector
 	float s;
-	std::valarray<float> vector = std::valarray<float>(3);
+	float3 vector;
 
 	// build quaternion
-	quaternion(float rotation, std::valarray<float> _vector){
+	quaternion(float rotation, float3 _vector){
 		s = rotation;
-		vector = _vector;
+		vector.x = _vector.x; 
+		vector.y = _vector.y;
+		vector.z = _vector.z;
 	}
 
 	// overload - optional for defining a quaternion without inputs
-	quaternion() { s = 0; }
+	quaternion() { s = 0; vector.x = 0; vector.y = 0; vector.z = 0; }
 
+	// copy constructor
+	quaternion(const quaternion& q){
+		s = q.s;
+		vector.x = q.vector.x; 
+		vector.y = q.vector.y;
+		vector.z = q.vector.z;
+	}
+	// assignment operator
+	quaternion& operator=(const quaternion& q);
 	// basic operations
 	void operator+=(const quaternion& q);
 	quaternion operator+(const quaternion& q);

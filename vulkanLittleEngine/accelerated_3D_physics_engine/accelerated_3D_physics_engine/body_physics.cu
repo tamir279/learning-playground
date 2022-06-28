@@ -240,15 +240,15 @@ struct polygonAreaAddition : public thrust::binary_function<thrust::tuple<partic
     __host__ __device__ float operator()(const thrust::tuple<particle, particle, particle>& polygon1,
                                          const thrust::tuple<particle, particle, particle>& polygon2) {
 
-        // get cross product in polygon1 : cross1 = |u11 x u21|
+        // get cross product in polygon1 : cross1 = u11 x u21
         auto cross1 = thrust_cross(thrust_minus(thrust::get<0>(polygon1).center, thrust::get<1>(polygon1).center),
                                    thrust_minus(thrust::get<0>(polygon1).center, thrust::get<2>(polygon1).center));
         
-        // get cross product in polygon2 : cross2 = |u21 x u22|
+        // get cross product in polygon2 : cross2 = u21 x u22
         auto cross2 = thrust_cross(thrust_minus(thrust::get<0>(polygon2).center, thrust::get<1>(polygon2).center),
                                    thrust_minus(thrust::get<0>(polygon2).center, thrust::get<2>(polygon2).center));
 
-        // return the sum of areas 
+        // return the sum of areas : 1/2 |cross1| + 1/2 |cross2| = 1/2 |u11 x u21| + 1/2 |u21 x u22| = s1 + s2
         return 0.5f * thrust_L2(cross1) + 0.5 * thrust_L2(cross2);
     }
 };
@@ -315,12 +315,29 @@ struct multiplyByScalar : public thrust::unary_function<float3, float3>{
     }
 };
 
+// add a constant scalar
+struct addConst : public thrust::unary_function<float3, float3> {
+
+    float3 val;
+    bool plus;
+
+    addConst(const float3 _val, const bool _plus) : val{ _val }, plus{ _plus }{}
+
+    __host__ __device__ float3 operator()(float3 v) {
+        return (plus) ? thrust_plus(val, v) : thrust_minus(val, v);
+    }
+};
+
 // add two arrays of points together
 struct thrustAdd : public thrust::binary_function<float3, float3, float3>{
 
+    bool plus;
+
+    thrustAdd(bool _sign) : plus{ _sign } {}
+
     __host__ __device__ 
     float3 operator()(float3 v1, float3 v2) {
-        return thrust_plus(v1, v2);
+        return (plus) ? thrust_plus(v1, v2) : thrust_minus(v1, v2);
     }
 };
                                                  
@@ -375,6 +392,7 @@ struct vectorProjection : public thrust::unary_function<thrust::tuple<float3, fl
     }
 };
 
+// r_total = r_cm + q_r*r0*q_r^-1 + dr
 struct RotAndTranslate : public thrust::binary_function<particle, 
                                                         thrust::tuple<float, float, float>, particle> {
 
@@ -385,9 +403,29 @@ struct RotAndTranslate : public thrust::binary_function<particle,
 
     __host__ __device__
     particle operator()(particle currentPosition, thrust::tuple<float, float, float> fluctuations) {
-
+        // rotate particle
+        // define the particle quaternion [0, currentPoistionCenter]
+        quaternion particleQuaternion(0, currentPosition.center);
+        particleQuaternion = rot * particleQuaternion * rot.inverse();
+        // get rotated center and translate by r_cm + dr
+        float3 updatedPos = thrust_plus(cm, particleQuaternion.vector);
+        // add the fluctuations
+        updatedPos.x += thrust::get<0>(fluctuations);
+        updatedPos.y += thrust::get<1>(fluctuations);
+        updatedPos.z += thrust::get<2>(fluctuations);
+        // return an updated particle
+        return { updatedPos, currentPosition.radius, currentPosition.mass };
     }
 };
+
+// calculate cross between two vector arrays
+struct cross_product : public thrust::unary_function<thrust::tuple<float3, particle>, float3> {
+    
+    __host__ __device__ float3 operator()(thrust::tuple<float3, particle> particleState) {
+        return thrust_cross(thrust::get<1>(particleState).center, thrust::get<0>(particleState));
+    }
+};
+
 /*
 -----------------------------------------------------------
 -------------------- library functions --------------------
@@ -482,6 +520,7 @@ void rigid_body::initTotalExternalForce() {
 }
 
 // initial torque is corresponding to inital force - gravity
+// TODO : change function to calculate the torque including the internal body pressure force
 void rigid_body::initTorque(){
     rigidState[TORQUE] = { make_float3(0.0f, 0.0f, 0.0f) };
     for(auto& particle : relativeParticles){
@@ -575,7 +614,7 @@ void rigid_body::calculatePressureForce(){
     // add the result force distribution to force distribution
     thrust_wrapper_transform(true, first, last, rigidState[FORCE_DISTRIBUTION].begin(),
                              rigidState[FORCE_DISTRIBUTION].end(), rigidState[FORCE_DISTRIBUTION].begin(),
-                             thrustAdd());
+                             thrustAdd(true));
 }
 
 // r_cm_n+1 = r_cm_n + dt*vx_n
@@ -600,9 +639,7 @@ R_n -> q_n -> q_n+1 = q_n + DT/2 w_n*q_n -> R_n+1
 */
 void rigid_body::calculateRotation(){
     // represent angular velocity as a quaternion
-    auto [wx, wy, wz] = THRUSTtoSTDtuple(rigidState[ANGULAR_VELOCITY][0]);
-    std::valarray<float> w_vector = { wx, wy, wz };
-    quaternion w(0.0f, w_vector); 
+    quaternion w(0.0f, rigidState[ANGULAR_VELOCITY][0]);
     // represent rotation matrix as a quaternion
     quaternion q_n; q_n.createUnitQuarenion(flatten_3(rigidState[ROTATION]));
     // make sure q_n represents rotation
@@ -624,12 +661,23 @@ void rigid_body::calculateForceDistribution() {
 }
 
 void rigid_body::calculateTotalExternalForce() {
-   // for calculating with thrust - switch to thrust::tuples
+    rigidState[TOTAL_EXTERNAL_FORCE][0] = thrust_wrapper_reduce(true, rigidState[FORCE_DISTRIBUTION].begin(),
+                                                                rigidState[FORCE_DISTRIBUTION].end(),
+                                                                make_float3(0.0f, 0.0f, 0.0f),
+                                                                thrustAdd(true));
 }
 
+// t = sum_i{r_i x f_i}, r_i = r_world_i - r_cm
 void rigid_body::calculateTorque() {
-    // loop over force distribution and particles to get the cross products.
-    // for calculating with thrust - switch to thrust::tuples
+    // zip iterator for the force acting on each particle, and particle data
+    auto zip_first = thrust::make_zip_iterator(thrust::make_tuple(rigidState[FORCE_DISTRIBUTION].begin(),
+                                                                  relativeParticles.begin()));
+    auto zip_last = thrust::make_zip_iterator(thrust::make_tuple(rigidState[FORCE_DISTRIBUTION].end(),
+                                                                 relativeParticles.end()));
+    rigidState[TORQUE][0] = thrust_wrapper_reduce(true, 
+                                                  thrust::make_transform_iterator(zip_first, cross_product()),
+                                                  thrust::make_transform_iterator(zip_last, cross_product()),
+                                                  make_float3(0.0f, 0.0f, 0.0f), thrustAdd(true));
 }
 
 /*
@@ -663,7 +711,9 @@ vector<float> rigid_body::decomposeExternalForces() {
     auto y_data = strided_iterator<float*>(externalForce.data + 1, externalForce.data + 3 * systemSize - 1, 3);
     auto z_data = strided_iterator<float*>(externalForce.data + 2, externalForce.data + 3 * systemSize, 3);
     // create a zip iterator
-    auto zipExtForceR = thrust::make_zip_iterator(thrust::make_tuple(x_data, y_data, z_data));
+    auto zipExtForceR = thrust::make_zip_iterator(thrust::make_tuple(x_data.begin(),
+                                                                     y_data.begin(),
+                                                                     z_data.begin()));
 
     thrust_wrapper_transform(true, zipExtForceB, zipExtForceE, zipExtForceR, vectorProjection()); 
     return externalForce;                                                               
@@ -696,7 +746,27 @@ r_total = r_cm + q_r*r0*q_r^-1 + dr, dr = Q_t[i]
  r_total_rel = r_total - r_cm
 */
 void rigid_body::updatePosition() {
-    
+    quaternion rotation; rotation.createUnitQuarenion(flatten_3(rigidState[ROTATION]));
+    // create dispacement vector iterator
+    auto x_iter = strided_iterator<float*>(Displacement.data, Displacement.data + 3 * systemSize - 2, 3);
+    auto y_iter = strided_iterator<float*>(Displacement.data + 1, Displacement.data + 3 * systemSize - 1, 3);
+    auto z_iter = strided_iterator<float*>(Displacement.data + 2, Displacement.data + 3 * systemSize, 3);
+    // iterate over all particles
+    auto zip_begin = thrust::make_zip_iterator(thrust::make_tuple(x_iter.begin(),
+                                                                  y_iter.begin(),
+                                                                  z_iter.begin()));
+    auto zip_end = thrust::make_zip_iterator(thrust::make_tuple(x_iter.end(),
+                                                                y_iter.end(),
+                                                                z_iter.end()));
+    thrust_wrapper_transform(true, particles.begin(), 
+                             particles.end(), 
+                             zip_begin, zip_end,
+                             particles.begin(),
+                             RotAndTranslate(rigidState[CENTER_MASS][0], rotation));
+    // update all relative particle positions
+    thrust_wrapper_transform(true, particles.begin(),
+                             particles.end(), relativeParticles.begin(),
+                             addConst(rigidState[CENTER_MASS][0], false));
 }
 
 void rigid_body::advance() {
