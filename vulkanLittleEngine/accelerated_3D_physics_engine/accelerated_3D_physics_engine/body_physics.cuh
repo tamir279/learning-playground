@@ -47,6 +47,17 @@ public:
         // load vertices, normals, surface polygons and index arrays
         readData(modelPath);
     }
+
+    // copy constructor
+    geometricData(const geometricData& geometry) {
+        copyData(geometry);
+    }
+
+    // assignment operator
+    geometricData& operator=(const geometricData& geometry) {
+        copyData(geometry);
+    }
+
     // convert vertices to std::vector<particle> surface
     std::vector<particle> convertVerticesToBodySurface();
     // convert vertex normals to face normals : 
@@ -65,7 +76,8 @@ private:
     // a polygon array
     void getSurfacePolygons();
     void readData(const std::string modelPath);
-
+    // copy all data
+    void copyData(const geometricData& geometry);
 };
 
 class rigid_body {
@@ -143,14 +155,29 @@ public:
         n = moleNum; R = idealGasConst; T = temperature;
     }
 
+    rigid_body(const rigid_body& body) : 
+        DampingDistribMatrix{ body.DampingDistribMatrix }, DampingMatrix{ body.DampingMatrix },
+        infMassDistrib{ body.infMassDistrib }, Displacement{ body.Displacement }, 
+        Displacement_t_dt{ body.Displacement_t_dt }, Displacement_t_2dt{ body.Displacement_t_2dt },
+        solver{ body.solver }, bodySurface{ body.bodySurface }{
+
+        copyBodyData(body);
+    }
+
+    rigid_body& operator=(const rigid_body& body) {
+        copyBodyData(body);
+    }
+
     void init();
     void advance();
+
 private:
     // data management
     void readGeometryToData(const std::string modelPath);
     void transferToRawGeometricData();
     void transferToParticleData();
     void calculateRestitutionConstant(const float rigidity);
+    void copyBodyData(const rigid_body& body);
 
     // -------- initialize body state --------
     // init rigid body state
@@ -190,8 +217,29 @@ private:
     void getDampingMatrix();
     void updateDisplacementVector();
     vector<float> decomposeExternalForces();
-    void getOuterSurfaceDeformation();
     // get the sum of all changes in place - linear + angular + inner - and update particle center positions
     void updatePosition();
 };
 
+
+// collision detection using scaning for collisions between specific particles in the surface of the body 
+// (i.e vertex particles), there is a consideration with resting position.
+class collision_detector {
+public:
+
+    collision_detector(const rigid_body _body1, const rigid_body _body2, float _epsilon) : 
+        body1{ _body1 }, body2{ _body2 }, velocityEpsilon{ _epsilon } {}
+
+    bool Collided();
+
+    void applyCollisionForces();
+
+private:
+
+    float velocityEpsilon;
+    rigid_body body1;
+    rigid_body body2;
+
+    void getCollitionParticles(std::vector<float3>& v1, std::vector<float3>& v2);
+
+};

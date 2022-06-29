@@ -1,6 +1,4 @@
 #include "body_physics.cuh"
-//#include <execution>
-//#include <algorithm>
 /*
 -------------------- utility functions -------------------- 
 */
@@ -783,7 +781,6 @@ void rigid_body::advance() {
     calculateTorque();
     // soft body data
     updateDisplacementVector();
-    getOuterSurfaceDeformation();
     // updata the body position - all of particle position changes
     // r_new = r_cm + q_r*r0*q_r^-1 - angular + linear
     // r_total = r_cm + q_r*r0*q_r^-1 + dr, dr is the inner particle pertubation made from external forces.
