@@ -2,6 +2,7 @@
 #include <string>
 #include <tuple>
 #include <thrust/tuple.h>
+#include <thrust/pair.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include "quaternion_math.h"
@@ -23,6 +24,12 @@ enum EXT_pParam{
     TORQUE,
     INVERSE_INERTIA_TENSOR,
     ANGULAR_VELOCITY
+};
+
+enum body_type {
+    REGULAR,
+    IMMOVABLE,
+    GROUND
 };
 
 struct particle {
@@ -98,6 +105,9 @@ public:
     float n; // gas mol number
     float R; // ideal gas constant
     float T; // temprature
+    body_type type; // defines if a body will have standard physical dynamics model
+                    // if not - it will be immovable/ground body -> M = infinity, it is not affected by
+                    // other bodies
 
     // body inverse inertia tensor
     std::vector<float3> inverseBodyInertia; // body constant describing mass distributions
@@ -139,7 +149,7 @@ public:
     */
 
     rigid_body(const std::string modelPath, const float _mass, const float _rigidity, const float time_step, const int size, 
-               const float moleNum, const float idealGasConst, const float temperature) : 
+               const float moleNum, const float idealGasConst, const float temperature, const body_type _type) : 
     DampingDistribMatrix(3*size, 3*size, memLocation::DEVICE),
     DampingMatrix(3*size, 3*size, memLocation::DEVICE),
     infMassDistrib(3*size, 3*size, memLocation::DEVICE),
@@ -152,7 +162,7 @@ public:
         readGeometryToData(modelPath);
         calculateRestitutionConstant(_rigidity);
         mass = _mass; rigidity = _rigidity; dt = time_step; systemSize = size;
-        n = moleNum; R = idealGasConst; T = temperature;
+        n = moleNum; R = idealGasConst; T = temperature; type = _type;
     }
 
     rigid_body(const rigid_body& body) : 
@@ -222,24 +232,89 @@ private:
 };
 
 
+
+/*
+---------------------------------------------------------------------------------------
+--------------------------------- COLLISION DETECTION ---------------------------------
+---------------------------------------------------------------------------------------
+*/
+
+
+struct pairInfo {
+    float priority; // alpha * (distance)^-1 + beta * (body_speeds) , alpha, beta >= 0 , alpha + beta = 1
+    thrust::pair<int, int> bodies;
+    thrust::pair<body_type, body_type> types;
+    int samplePeriod = 0; // number of time steps to wait between collision checks
+};
+
+// build a heap containing lower bound on distances between all bodies. body clusters that are closer 
+// to one another will be given higher priority that will result in higher rate of collison checking
+// MAX HEAP
+class collision_heap{
+public:
+    std::vector<pairInfo> collisionHeap;
+
+    collision_heap(std::vector<pairInfo> initialState) : collisionHeap{ initialState }{
+        buildHeap();
+    }
+
+    // empty constructor for building a heap manually
+    collision_heap(){}
+
+    void heapify(int index, int n);
+
+    void heapSort();
+
+    void insert(const pairInfo element);
+
+    // pops the highest priority -  gets the maximum value (A[0]) and pops it out of the heap
+    pairInfo popMax();
+
+    // pops specific element
+    pairInfo pop(const int index);
+
+    // update specific node
+    void update(const pairInfo element, const int index);
+
+    // update the entire heap at once
+    void update(const std::vector<pairInfo> updatedHeap);
+
+    pairInfo minHeap();
+
+    pairInfo maxHeap();
+
+    // assumes the heap is full of data
+    void buildHeap();
+};
+
 // collision detection using scaning for collisions between specific particles in the surface of the body 
 // (i.e vertex particles), there is a consideration with resting position.
-class collision_detector {
+// RIGHT NOW : NO FRICTION IS CONSIDERED
+class collision_handler{
 public:
 
-    collision_detector(const rigid_body _body1, const rigid_body _body2, float _epsilon) : 
-        body1{ _body1 }, body2{ _body2 }, velocityEpsilon{ _epsilon } {}
+    std::vector<float3> collisionImpulse;
 
-    bool Collided();
+    collision_handler(std::vector<pairInfo> initialSystemData) : priorityHeap(initialSystemData){
+        setSamplingRates();
+    }
 
-    void applyCollisionForces();
+    void updateHeapData(std::vector<pairInfo> updatedHeap);
+
+    void updateForces(std::vector<float3>& forceDistribution);
 
 private:
 
-    float velocityEpsilon;
-    rigid_body body1;
-    rigid_body body2;
+    float velocityThreshold = 10e-2;
+    collision_heap priorityHeap;
 
-    void getCollitionParticles(std::vector<float3>& v1, std::vector<float3>& v2);
-
+    void setSamplingRates();
+    void samplePairState();
+    void detectCollision();
+    void calculateImpulse();
+    void solveRestitutionConstrints();
+    void solveNonPenertrationConstraints();
 };
+
+// priority and body connection array are to be calculated in the total simulation class as a private parameter and
+// a method for calculating. there it will also update by : collisons.updateHeapData(newArray);
