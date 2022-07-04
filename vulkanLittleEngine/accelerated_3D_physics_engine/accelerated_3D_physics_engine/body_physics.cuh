@@ -7,7 +7,9 @@
 #include <cuda_runtime.h>
 #include "quaternion_math.h"
 #include "thrustWrappers.cuh"
-#include "accLinAlg.cuh"
+#include "3x3fastLinearAlgebra.cuh"
+#include "acceleratedLinearAlgebra.cuh"
+#include "collisionAlgorithms.cuh"
 
 // gravitational acceleration
 const float G = 9.81;
@@ -310,8 +312,8 @@ private:
 
     void setSamplingRates();
     void samplePairState();
-    void detectCollision();
-    void calculateImpulse();
+    void detectCollision(); // using collisionAlgorithms
+    void calculateImpulse(); // using collisionAlgorithms
     void solveRestitutionConstrints();
     void solveNonPenertrationConstraints();
 };

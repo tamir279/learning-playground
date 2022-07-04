@@ -141,7 +141,7 @@ thrust::device_vector<float> inverse_3x3_mat(thrust::device_vector<float> mat) {
                 mat[1] * (mat[5] * mat[6] - mat[3] * mat[8]) +
                 mat[2] * (mat[3] * mat[7] - mat[4] * mat[6]);
 
-    if (!det) throw std::runtime_error("sinular inertia matrix is not possible!");
+    if (det < 10e-2) throw std::runtime_error("singular inertia matrix is not possible!");
     // get inverse
     thrust::device_vector<float> inv(9);
     inv[0] = (mat[4] * mat[8] - mat[5] * mat[7]) / det; inv[1] = (mat[2] * mat[7] - mat[1] * mat[8]) / det;
