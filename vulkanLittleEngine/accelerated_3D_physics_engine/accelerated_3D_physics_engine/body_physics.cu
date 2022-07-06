@@ -424,6 +424,18 @@ struct cross_product : public thrust::unary_function<thrust::tuple<float3, parti
     }
 };
 
+// place mass elements correctly in mass matrix
+struct createMassMatrix : public thrust::unary_function<particle, thrust::tuple<float, float, float>> {
+
+    float val;
+
+    createMassMatrix(float _val) : val{ _val }{}
+
+    __host__ __device__ thrust::tuple<float, float, float> operator()(particle elem){
+        return thrust::make_tuple(val/elem.mass, val/elem.mass, val/elem.mass);
+    }
+};
+
 /*
 -----------------------------------------------------------
 -------------------- library functions --------------------
@@ -558,14 +570,34 @@ void rigid_body::initAngularVelocity() {
     rigidState[ANGULAR_VELOCITY] = { make_float3(0.0f, 0.0f, 0.0f) };
 }
 
+void rigid_body::initSpringForceHessian(){
+
+}
+
+
+void rigid_body::initStiffnessMatrix(){
+
+}
+
+// M^-1 = diag(1/m1, 1/m1, 1/m1, 1/m2, 1/m2, 1/m2, ..., 1/mn)
+void rigid_body::initInvMassMatrix(){
+    int rowDim = 3 * systemSize;
+    auto x_m = strided_iterator<float*>(invMassMatrix.data, invMassMatrix.data + rowDim * (rowDim - 2), rowDim);
+    auto y_m = strided_iterator<float*>(invMassMatrix.data + rowDim, invMassMatrix.data + rowDim * (rowDim - 1), rowDim);
+    auto z_m = strided_iterator<float*>(invMassMatrix.data + 2 * rowDim, invMassMatrix.data + rowDim * rowDim, rowDim);
+    auto zipData = thrust::make_zip_iterator(thrust::make_tuple(x_m.begin(), y_m.begin(), z_m.begin()));
+
+    thrust_wrapper_transform(true, particles.begin(), particles.end(), zipData, createMassMatrix(dt * dt));
+}
+
 void rigid_body::initDampingMatrix() {
 
 }
 
 void rigid_body::initDisplacementVector() {
     for (int i = 0; i < systemSize; i++) {
-        (Displacement_t_2dt.data)[i] = 0.0f;
-        (Displacement_t_dt.data)[i] = 0.0f;
+        (Displacement_n_2.data)[i] = 0.0f;
+        (Displacement_n_1.data)[i] = 0.0f;
         (Displacement.data)[i] = 0.0f;
     }
 }
@@ -602,6 +634,8 @@ void rigid_body::calculateBodyVolume() {
     V_approx = x * y * z;
 }
 
+// calculate the pressure force (as part of "external forces", even though it is an internal one...)
+// Fi = 1/v (nRT) (p_si - p_e) for each particle i
 void rigid_body::calculatePressureForce(){
     float magnitude = calculatePressureForceMagnitude(n, R, T, V_approx, bodySurface);
     thrust::device_vector<float3> res(rigidState[SPRING_DIRECTION].begin(),
@@ -719,23 +753,34 @@ vector<float> rigid_body::decomposeExternalForces() {
 
 /*
 equation : 
-(Mh + Kd - Ks) * Q_t = Mh * (2Q_(t-dt) - Q_(t-2dt)) - N * Ftotal_t
+**WARNING** q_n is total displacement compared to world coordinates and NOT center mass
+zeta_H * q_n = F + A_n * q_n-1 - q_n-2
+zeta = identity - dt^2 * invMass * (stiffnessMatrixHessian + dampingMatrix)
+A_n = 2 * identity - dt^2 * invMass * (stiffnessMatrixHessian + dampingMatrix - stiffnessMatrix_n),
+invMassMatrix = dt^2 * invMass
+F = external forces + f_g + f_pressure
 */
 void rigid_body::updateDisplacementVector() {
     auto F = decomposeExternalForces();
-    auto lhsMat = infMassDistrib + DampingDistribMatrix - DampingMatrix;
-    // for sparse equation
-    Sparse_mat<float> lhs_sparse(lhsMat.M, lhsMat.N, lhsMat.memState);
-    lhs_sparse.copyData(lhsMat); lhs_sparse.createCSR();
-    // TODO : add the calculation with the total external force
-    vector<float> rhsVec = infMassDistrib % (Displacement_t_dt + Displacement_t_dt - Displacement_t_2dt) - F;
-    // feed to solver
-    solver.I_matrix(lhs_sparse); solver.I_vector(rhsVec); 
-    // transfer old data to displacement in times t-dt, t-2dt before calculating solution
-    Displacement_t_2dt = Displacement_t_dt;
-    Displacement_t_dt = Displacement;
-    // solve
-    Displacement = solver.Solve();
+    mat<float> identity(3 * systemSize , 3 * systemSize, memLocation::DEVICE); identity.createIdentity();
+    /*
+    ---------------- calculate zeta ----------------
+    */
+    mat<float> SpringZetaTerm = invMassMatrix * (springForceHessian + DampingMatrix);
+    auto zeta = identity - SpringZetaTerm;
+    /*
+    ---------------- calculate lambda ----------------
+    */
+    mat<float> SpringTermLambda = invMassMatrix * (springForceHessian + DampingMatrix - stiffnessMatrix);
+    auto Lambda = identity + identity - SpringTermLambda;
+    /*
+    ---------------- calculate displacement ----------------
+    */
+    // zeta * Displacememt_n = F + Lambda * Displacement_n_1 - Displacement_n_2
+    // => Displacememt_n = zeta^-1 * (F + Lambda * Displacement_n_1 - Displacement_n_2)
+    solver.I_matrix(zeta);
+    solver.I_vector(F + Lambda * Displacement_n_1 - Displacement_n_2);
+    Displacement_n = solver.Solve();
 }
 
 /*
@@ -760,7 +805,7 @@ void rigid_body::updatePosition() {
                              particles.end(), 
                              zip_begin, zip_end,
                              particles.begin(),
-                             RotAndTranslate(rigidState[CENTER_MASS][0], rotation));
+                             RotAndTranslate(make_float3(0.0f, 0.0f, 0.0f), rotation));
     // update all relative particle positions
     thrust_wrapper_transform(true, particles.begin(),
                              particles.end(), relativeParticles.begin(),
@@ -783,6 +828,7 @@ void rigid_body::advance() {
     updateDisplacementVector();
     // updata the body position - all of particle position changes
     // r_new = r_cm + q_r*r0*q_r^-1 - angular + linear
+    updateStiffnessMatrix();
     // r_total = r_cm + q_r*r0*q_r^-1 + dr, dr is the inner particle pertubation made from external forces.
     updatePosition();
 }

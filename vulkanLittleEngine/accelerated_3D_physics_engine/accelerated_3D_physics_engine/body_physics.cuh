@@ -131,16 +131,18 @@ public:
     /*
     -------------- internal body state --------------
     */
-    // K_D
-    mat<float> DampingDistribMatrix;
-    // K_sigma
+    // K_spring
+    mat<float> stiffnessMatrix;
+    // Z_damping
     mat<float> DampingMatrix;
-    // M_h
-    mat<float> infMassDistrib;
+    // M^-1
+    Sparse_mat<float> invMassMatrix;
+    // linear approximation of the spring force derivative - hessian of the velocity
+    mat<float> springForceHessian;
     // during simulation it is needed to save the displacement vector at times t, t-dt, t-2dt
-    vector<float> Displacement; 
-    vector<float> Displacement_t_dt;
-    vector<float> Displacement_t_2dt;
+    vector<float> Displacement_n; 
+    vector<float> Displacement_n_1;
+    vector<float> Displacement_n_2;
     // linear matrix equation solver
     LinearSolver<float> solver;
 
@@ -152,15 +154,16 @@ public:
 
     rigid_body(const std::string modelPath, const float _mass, const float _rigidity, const float time_step, const int size, 
                const float moleNum, const float idealGasConst, const float temperature, const body_type _type) : 
-    DampingDistribMatrix(3*size, 3*size, memLocation::DEVICE),
+    stiffnessMatrix(3*size, 3*size, memLocation::DEVICE),
     DampingMatrix(3*size, 3*size, memLocation::DEVICE),
-    infMassDistrib(3*size, 3*size, memLocation::DEVICE),
+    invMassMatrix(3*size, 3*size, memLocation::DEVICE),
+    springForceHessian(3*size, 3*size, memLocation::DEVICE),
     Displacement(3*size, 1, memLocation::DEVICE),
-    Displacement_t_dt(3*size, 1, memLocation::DEVICE),
-    Displacement_t_2dt(3*size, 1, memLocation::DEVICE),
-    solver(CHOL, true),
+    Displacement_n_1(3*size, 1, memLocation::DEVICE),
+    Displacement_n_2(3*size, 1, memLocation::DEVICE),
+    solver(QR, false),
     bodySurface(modelPath){
-
+        // get geometric data
         readGeometryToData(modelPath);
         calculateRestitutionConstant(_rigidity);
         mass = _mass; rigidity = _rigidity; dt = time_step; systemSize = size;
@@ -168,10 +171,10 @@ public:
     }
 
     rigid_body(const rigid_body& body) : 
-        DampingDistribMatrix{ body.DampingDistribMatrix }, DampingMatrix{ body.DampingMatrix },
-        infMassDistrib{ body.infMassDistrib }, Displacement{ body.Displacement }, 
-        Displacement_t_dt{ body.Displacement_t_dt }, Displacement_t_2dt{ body.Displacement_t_2dt },
-        solver{ body.solver }, bodySurface{ body.bodySurface }{
+        stiffnessMatrix{ body.stiffnessMatrix }, DampingMatrix{ body.DampingMatrix },
+        invMassMatrix{ body.invMassMatrix }, springForceHessian{ body.springForceHessian },
+        Displacement{ body.Displacement }, Displacement_n_1{ body.Displacement_t_dt }, 
+        Displacement_n_2{ body.Displacement_t_2dt }, solver{ body.solver }, bodySurface{ body.bodySurface }{
 
         copyBodyData(body);
     }
@@ -207,6 +210,9 @@ private:
     void initAngularVelocity();
 
     // init internal particle state
+    void initSpringForceHessian();
+    void initStiffnessMatrix();
+    void initInvMassMatrix();
     void initDampingMatrix();
     void initDisplacementVector();
 
@@ -226,8 +232,8 @@ private:
     void calculateAngularVelocity();
 
     // internal particle model calculations - for the NEXT step!
-    void getDampingMatrix();
     void updateDisplacementVector();
+    void updateStiffnessMatrix();
     vector<float> decomposeExternalForces();
     // get the sum of all changes in place - linear + angular + inner - and update particle center positions
     void updatePosition();

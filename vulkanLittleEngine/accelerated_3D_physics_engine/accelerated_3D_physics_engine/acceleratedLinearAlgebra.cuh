@@ -378,6 +378,14 @@ public:
 		return *this;
 	}
 
+	// dynamic copying - from Sparse matrix to a dense one (only structured 
+	// data and not CSR compressed)
+	mat<T>& operator=(const Sparse_mat<T>& B) {
+		emptyAllocation(&data, B.M, B.N, B.memState, empty, &M, &N);
+		dynamicCopy(data, B.data, M, N, memState, B.memState);
+		return *this;
+	}
+
 	// check if transfer to device is needed
 	bool checkToAllocateOnDevice(const T* h_m, T** d_m, int n_rows, int n_cols, memLocation memLoc);
 
@@ -387,6 +395,8 @@ public:
 	// special matrix functions
 	// transpose - using tiled transpose kernel
 	void transpose();
+	// make the matrix an identity matrix
+	void createIdentity();
 
 protected:
 	// matrix negation - for subtraction
@@ -869,10 +879,35 @@ void mat<T>::transpose() {
 	int new_dim_x = N; 
 	int new_dim_y = M;
 	M = new_dim_x; N = new_dim_y;
-	checkCudaErrors(cudaMemcpy(data, odata, N * M * sizeof(T), cudaMemcpyDeviceToHost));
+	if (i_st)checkCudaErrors(cudaMemcpy(data, odata, N * M * sizeof(T), cudaMemcpyDeviceToHost));
+	else checkCudaErrors(cudaMemcpy(data, odata, N * M * sizeof(T), cudaMemcpyDeviceToDevice));
 	// free memory
 	if (i_st)checkCudaErrors(cudaFree(idata));
 	checkCudaErrors(cudaFree(odata));
+}
+
+template<typename T>
+__global__ void cudaIdentity(T* data, int rows, int cols){
+	int x = blockDim.x*blockIdx.x + threadIdx.x;
+    int y = blockDim.y*blockIdx.y + threadIdx.y;
+
+	// column major
+	if(x < rows && y < cols){
+		data[y * rows + x] = (x == y) ? 1.0f : 0.0f;
+	}
+}
+
+void mat<T>::createIdentity(){
+	T* odata;
+	bool data_st = checkToAllocateOnDevice(data, &odata, M, N, memState);
+
+	dim3 threadsPerBlock(TILE_DIM, BLOCK_ROWS);
+	dim3 numBlocks((N + threadsPerBlock.x - 1) / threadsPerBlock.x, (M + threadsPerBlock.y - 1) / threadsPerBlock.y);
+	cudaIdentity<T> <<<numBlocks, threadsPerBlock>>> ((data_st) ? odata : data, M, N);
+	if (i_st){
+		checkCudaErrors(cudaMemcpy(data, odata, M * N * sizeof(T), cudaMemcpyDeviceToHost));
+		checkCudaErrors(cudaFree(odata));
+	}
 }
 
 /*
