@@ -390,27 +390,14 @@ struct vectorProjection : public thrust::unary_function<thrust::tuple<float3, fl
     }
 };
 
-// r_total = r_cm + q_r*r0*q_r^-1 + dr
-struct RotAndTranslate : public thrust::binary_function<particle, 
-                                                        thrust::tuple<float, float, float>, particle> {
-
-    float3 cm;
-    quaternion rot;
-
-    RotAndTranslate(const float3 _cm, const quaternion _rot) : cm{ _cm }, rot{ _rot }{}
+// r.center = q_n+1
+struct copyPos : public thrust::binary_function<particle, thrust::tuple<float, float, float>, particle> {
 
     __host__ __device__
-    particle operator()(particle currentPosition, thrust::tuple<float, float, float> fluctuations) {
-        // rotate particle
-        // define the particle quaternion [0, currentPoistionCenter]
-        quaternion particleQuaternion(0, currentPosition.center);
-        particleQuaternion = rot * particleQuaternion * rot.inverse();
-        // get rotated center and translate by r_cm + dr
-        float3 updatedPos = thrust_plus(cm, particleQuaternion.vector);
-        // add the fluctuations
-        updatedPos.x += thrust::get<0>(fluctuations);
-        updatedPos.y += thrust::get<1>(fluctuations);
-        updatedPos.z += thrust::get<2>(fluctuations);
+    particle operator()(particle currentPosition, thrust::tuple<float, float, float> displacement) {
+        float3 updatedPos = make_float3(thrust::get<0>(displacement),
+                                        thrust::get<1>(displacement),
+                                        thrust::get<2>(displacement));
         // return an updated particle
         return { updatedPos, currentPosition.radius, currentPosition.mass };
     }
@@ -570,6 +557,10 @@ void rigid_body::initAngularVelocity() {
     rigidState[ANGULAR_VELOCITY] = { make_float3(0.0f, 0.0f, 0.0f) };
 }
 
+void rigid_body::initIdentity(){
+    identity.createIdentity();
+}
+
 void rigid_body::initSpringForceHessian(){
 
 }
@@ -594,11 +585,26 @@ void rigid_body::initDampingMatrix() {
 
 }
 
+void rigid_body::initZeta(){
+    mat<float> SpringZetaTerm = invMassMatrix * (springForceHessian + DampingMatrix);
+    Zeta = identity - SpringZetaTerm;
+}
+
 void rigid_body::initDisplacementVector() {
     for (int i = 0; i < systemSize; i++) {
-        (Displacement_n_2.data)[i] = 0.0f;
-        (Displacement_n_1.data)[i] = 0.0f;
-        (Displacement.data)[i] = 0.0f;
+        // time t0 -2
+        (Displacement_n_2.data)[3 * i] = 0.0f;
+        (Displacement_n_2.data)[3 * i + 1] = 0.0f;
+        (Displacement_n_2.data)[3 * i + 2] = 0.0f;
+        // time t0 -1
+        (Displacement_n_1.data)[3 * i] = 0.0f;
+        (Displacement_n_1.data)[3 * i + 1] = 0.0f;
+        (Displacement_n_1.data)[3 * i + 2] = 0.0f;
+        // initial time t0
+        auto [x, y, z] = THRUSTtoSTDtuple(particles[i]);
+        (Displacement.data)[3 * i] = x;
+        (Displacement.data)[3 * i + 1] = y;
+        (Displacement.data)[3 * i + 2] = z;
     }
 }
 
@@ -753,33 +759,32 @@ vector<float> rigid_body::decomposeExternalForces() {
 
 /*
 equation : 
-**WARNING** q_n is total displacement compared to world coordinates and NOT center mass
-zeta_H * q_n = F + A_n * q_n-1 - q_n-2
+**CAUTION** q_n is total displacement compared to world coordinates and NOT center mass
+zeta is constant of the specific body and materials
+zeta_H * q_n = F + (A_n + zeta_H) * q_n-1 - q_n-2
 zeta = identity - dt^2 * invMass * (stiffnessMatrixHessian + dampingMatrix)
-A_n = 2 * identity - dt^2 * invMass * (stiffnessMatrixHessian + dampingMatrix - stiffnessMatrix_n),
+A_n + zeta_H = 2 * identity - dt^2 * invMass * (stiffnessMatrixHessian + dampingMatrix - stiffnessMatrix_n),
 invMassMatrix = dt^2 * invMass
 F = external forces + f_g + f_pressure
 */
+// TODO : calculate the constant matrices beforehand, so that current calculation will involve only 
+// the stiffness matrix 
 void rigid_body::updateDisplacementVector() {
     auto F = decomposeExternalForces();
-    mat<float> identity(3 * systemSize , 3 * systemSize, memLocation::DEVICE); identity.createIdentity();
     /*
-    ---------------- calculate zeta ----------------
+    ---------------- calculate theta = lambda + zeta ----------------
     */
-    mat<float> SpringZetaTerm = invMassMatrix * (springForceHessian + DampingMatrix);
-    auto zeta = identity - SpringZetaTerm;
-    /*
-    ---------------- calculate lambda ----------------
-    */
-    mat<float> SpringTermLambda = invMassMatrix * (springForceHessian + DampingMatrix - stiffnessMatrix);
-    auto Lambda = identity + identity - SpringTermLambda;
+    mat<float> Lambda = identity + invMassMatrix * stiffnessMatrix;
+    auto Theta = Zeta + Lambda;
     /*
     ---------------- calculate displacement ----------------
     */
-    // zeta * Displacememt_n = F + Lambda * Displacement_n_1 - Displacement_n_2
-    // => Displacememt_n = zeta^-1 * (F + Lambda * Displacement_n_1 - Displacement_n_2)
-    solver.I_matrix(zeta);
-    solver.I_vector(F + Lambda * Displacement_n_1 - Displacement_n_2);
+    // zeta * Displacememt_n = F + Theta * Displacement_n_1 - Displacement_n_2
+    // => Displacememt_n = zeta^-1 * (F + Theta * Displacement_n_1 - Displacement_n_2)
+    solver.I_matrix(Zeta);
+    solver.I_vector(F + Theta * Displacement_n_1 - Displacement_n_2);
+    Displacement_n_2 = Displacememt_n_1;
+    Displacement_n_1 = Displacememt_n;
     Displacement_n = solver.Solve();
 }
 
@@ -805,7 +810,7 @@ void rigid_body::updatePosition() {
                              particles.end(), 
                              zip_begin, zip_end,
                              particles.begin(),
-                             RotAndTranslate(make_float3(0.0f, 0.0f, 0.0f), rotation));
+                             copyPos());
     // update all relative particle positions
     thrust_wrapper_transform(true, particles.begin(),
                              particles.end(), relativeParticles.begin(),
@@ -826,9 +831,6 @@ void rigid_body::advance() {
     calculateTorque();
     // soft body data
     updateDisplacementVector();
-    // updata the body position - all of particle position changes
-    // r_new = r_cm + q_r*r0*q_r^-1 - angular + linear
     updateStiffnessMatrix();
-    // r_total = r_cm + q_r*r0*q_r^-1 + dr, dr is the inner particle pertubation made from external forces.
     updatePosition();
 }

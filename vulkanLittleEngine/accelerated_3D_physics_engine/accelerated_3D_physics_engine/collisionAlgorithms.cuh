@@ -4,6 +4,11 @@
 
 namespace colDetect{
 
+    void constructVoroniRegions();
+
+    void checkForClosestPoints();
+
+    void detectCollision();
 }
 
 namespace colReact{

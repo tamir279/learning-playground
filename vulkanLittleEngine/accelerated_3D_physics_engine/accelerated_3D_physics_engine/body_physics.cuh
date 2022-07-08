@@ -67,6 +67,7 @@ public:
         copyData(geometry);
     }
 
+    void buildParticleGrid(std::vector<float3>& data);
     // convert vertices to std::vector<particle> surface
     std::vector<particle> convertVerticesToBodySurface();
     // convert vertex normals to face normals : 
@@ -139,6 +140,10 @@ public:
     Sparse_mat<float> invMassMatrix;
     // linear approximation of the spring force derivative - hessian of the velocity
     mat<float> springForceHessian;
+    // zeta * q_n = F_ext + (Lambda + zeta)q_n - q_n-1
+    mat<float> Zeta;
+    // helper identity matrix 
+    mat<float> identity;
     // during simulation it is needed to save the displacement vector at times t, t-dt, t-2dt
     vector<float> Displacement_n; 
     vector<float> Displacement_n_1;
@@ -158,7 +163,9 @@ public:
     DampingMatrix(3*size, 3*size, memLocation::DEVICE),
     invMassMatrix(3*size, 3*size, memLocation::DEVICE),
     springForceHessian(3*size, 3*size, memLocation::DEVICE),
-    Displacement(3*size, 1, memLocation::DEVICE),
+    Zeta(3*size, 3*size, memLocation::DEVICE),
+    identity(3*size, 3*size, memLocation::DEVICE),
+    Displacement_n(3*size, 1, memLocation::DEVICE),
     Displacement_n_1(3*size, 1, memLocation::DEVICE),
     Displacement_n_2(3*size, 1, memLocation::DEVICE),
     solver(QR, false),
@@ -172,9 +179,9 @@ public:
 
     rigid_body(const rigid_body& body) : 
         stiffnessMatrix{ body.stiffnessMatrix }, DampingMatrix{ body.DampingMatrix },
-        invMassMatrix{ body.invMassMatrix }, springForceHessian{ body.springForceHessian },
-        Displacement{ body.Displacement }, Displacement_n_1{ body.Displacement_t_dt }, 
-        Displacement_n_2{ body.Displacement_t_2dt }, solver{ body.solver }, bodySurface{ body.bodySurface }{
+        invMassMatrix{ body.invMassMatrix }, springForceHessian{ body.springForceHessian }, Zeta{ body.Zeta },
+        Displacement_n{ body.Displacement_n }, Displacement_n_1{ body.Displacement_n_1 }, 
+        Displacement_n_2{ body.Displacement_n_2 }, solver{ body.solver }, bodySurface{ body.bodySurface }{
 
         copyBodyData(body);
     }
@@ -210,10 +217,12 @@ private:
     void initAngularVelocity();
 
     // init internal particle state
+    void initIdentity();
     void initSpringForceHessian();
     void initStiffnessMatrix();
     void initInvMassMatrix();
     void initDampingMatrix();
+    void initZeta();
     void initDisplacementVector();
 
     // -------- advance state one step --------
@@ -251,6 +260,7 @@ private:
 struct pairInfo {
     float priority; // alpha * (distance)^-1 + beta * (body_speeds) , alpha, beta >= 0 , alpha + beta = 1
     thrust::pair<int, int> bodies;
+    thrust::pair<int, int> bodiesDimensions;
     thrust::pair<body_type, body_type> types;
     int samplePeriod = 0; // number of time steps to wait between collision checks
 };
@@ -314,6 +324,7 @@ public:
 private:
 
     float velocityThreshold = 10e-2;
+    float epsilon = 0;
     collision_heap priorityHeap;
 
     void setSamplingRates();
