@@ -9,7 +9,7 @@
 #include "thrustWrappers.cuh"
 #include "3x3fastLinearAlgebra.cuh"
 #include "acceleratedLinearAlgebra.cuh"
-#include "collisionAlgorithms.cuh"
+
 
 // gravitational acceleration
 const float G = 9.81;
@@ -40,12 +40,20 @@ struct particle {
     float mass;
 };
 
+// for cuda kernels - new struct consisting polygon data
+// it is created for using polygonal structures also with cuda kernels
+struct cudaPoly {
+    float3 v1;
+    float3 v2;
+    float3 v3;
+};
+
 class geometricData{
 public:
     // loaded data from model .obj file.
     std::vector<float3> vertices;
     std::vector<float3> normals;
-    std::vector<thrust::tuple<particle, particle, particle>> surfacePolygons;
+    std::vector<cudaPoly> surfacePolygons;
     std::vector<int> indices;
 
     // built data for fast calculations

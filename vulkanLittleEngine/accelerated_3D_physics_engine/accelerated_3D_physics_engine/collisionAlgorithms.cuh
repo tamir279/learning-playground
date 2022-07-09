@@ -1,14 +1,148 @@
 #include <vector>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "device_launch_parameters.h"
+#include "body_physics.cuh"
+
+#define NOT_FOUND 420.69
 
 namespace colDetect{
 
-    void constructVoroniRegions();
+    __host__ __device__
+    float3 negateVector(float3 v){
+        return make_float3(-v.x, -v.y, -v.z);
+    }
 
-    void checkForClosestPoints();
+    __host__ __device__ 
+    float tupleDot(float3 u, float3 vi, float3 ve){
+        return u.x * (ve.x - vi.x) + u.y * (ve.y - ve.y) + u.z * (ve.z - ve.z);
+    }
 
-    void detectCollision();
+     __host__ __device__ 
+    float tupleDot(float3 ui, float3 ue, float3 vi, float3 ve){
+        return (ue.x - ui.x) * (ve.x - vi.x) +
+               (ue.y - ui.y) * (ve.y - ve.y) + 
+               (ue.z - ui.z) * (ve.z - ve.z);
+    }
+
+    __host__ __device__ 
+    float3 geometricPolygonCenter(cudaPoly polygon){
+        return make_float3((1.0f/3.0f) * (polygon.v1.x + polygon.v2.x + polygon.v3.x),
+                           (1.0f/3.0f) * (polygon.v1.y + polygon.v2.y + polygon.v3.y),
+                           (1.0f/3.0f) * (polygon.v1.z + polygon.v2.z + polygon.v3.z));
+    }
+
+    __host__ __device__
+    float3 tupleCross(float3 u, float3 vi, float3 ve, cudaPoly polygon){
+        // calculate geometric center as a reference point for correct "inside" of the region
+        // direction
+        auto pGeom = geometricPolygonCenter(polygon);
+        // calculate the initial direction of the voronoi plane normal : Nei = Np x (ve - vi)
+        auto N = make_float3(u.y * (ve.z - vi.z) - u.z * (ve.y - vi.y),
+                             u.z * (ve.x - vi.x) - u.x * (ve.z - vi.z),
+                             u.x * (ve.y - vi.y) - u.y * (ve.x - vi.x));
+        // check if the normal is pointing in the "inside" region (i.e. dot product <pG - vi, Nei>)
+        return (tupleDot(N, vi, pGeom) >= 0) ? N : negateVector(N);
+        
+    }
+
+    // calculate the normals to the voronoi planes of each polygon - for specific polygon i
+    __host__ __device__
+    thrust::tuple<float3, float3, float3> constructVoronoiRegion(cudaPoly polygon, float3 normal){
+        thrust::tuple<float3, float3, float3> resN;
+        // calculate Ne1, Ne2, Ne3
+        return thrust::make_tuple(tupleCross(normal, polygon.v3, polygon.v1, polygon),
+                                  tupleCross(normal, polygon.v1, polygon.v2, polygon),
+                                  tupleCross(normal, polygon.v2, polygon.v3, polygon));
+    }
+
+    __host__ __device__
+    bool checkVoronoiConditionForClosestPoints(float3 u1, float3 u2,
+                                               cudaPoly polygon1, 
+                                               float3 normal1,
+                                               cudaPoly polygon2,
+                                               float3 normal2){
+        // build voronoi regions for each polygon
+        auto region1 = constructVoronoiRegion(polygon1, normal1);
+        auto region2 = constructVoronoiRegion(polygon2, normal2);
+        // check each point if it is inside the voronoi region of the other point
+        // v1 in F(v2)
+        bool in2 = (tupleDot(thrust::get<0>(region2), polygon2.v1, u1) >= 0) &&
+                   (tupleDot(thrust::get<1>(region2), polygon2.v2, u1) >= 0) &&
+                   (tupleDot(thrust::get<2>(region2), polygon2.v3, u1) >= 0) &&
+                   (tupleDot(normal2, polygon2.v1, u1) >= 0);
+        // v2 in F(v1)
+        bool in1 = (tupleDot(thrust::get<0>(region1), polygon2.v1, u2) >= 0) &&
+                   (tupleDot(thrust::get<1>(region1), polygon2.v2, u2) >= 0) &&
+                   (tupleDot(thrust::get<2>(region1), polygon2.v3, u2) >= 0) &&
+                   (tupleDot(normal1, polygon2.v1, u2) >= 0);
+        return in1 && in2;
+    }
+
+    // create a cuda kernel to run over all options
+    __global__ void detect(float3* normals1,
+                           float3* normals2,
+                           cudaPoly* polyArr1,
+                           cudaPoly* polyArr2,
+                           int p1Size,
+                           int p2Size,
+                           float eps_sq,
+                           int* polyInd1,
+                           int* vec1, 
+                           int* polyInd2,
+                           int* vec2,
+                           bool* detected){
+        
+        int i = blockIdx.x * blockDim.x + threadIdx.x;
+        int j = blockIdx.y * blockDim.y + threadIdx.y;
+        
+        if(i < p1Size && j < p2Size){
+            float3 poly1[3] = { polyArr1[i].v1, polyArr1[i].v2, polyArr1[i].v3 };
+            float3 poly2[3] = { polyArr2[j].v1, polyArr2[j].v2, polyArr2[j].v3 }; 
+            for(int k = 0; k < 3; k++){
+                for(int m = 0; m < 3; m++){
+                    float dist = tupleDot(poly2[m], poly1[k], poly2[m], poly1[k]);
+                    if(dist < eps_sq && checkVoronoiConditionForClosestPoints(poly1[k], poly2[m],
+                                                                              polyArr1[i], normals1[i], 
+                                                                              polyArr2[j], normals2[j])){
+                        *polyInd1 = i; *polyInd2 = j; *vec1 = k; *vec2 = m; *detected = true;
+                    }
+                }
+            }
+        }
+        *detected = false;
+     }
+
+    std::tuple<int, int, int, int> detectCollision(std::vector<cudaPoly> polygons1,
+                                                   std::vector<cudaPoly> polygons2,
+                                                   std::vector<float3> normals1,
+                                                   std::vector<float3> normals2,
+                                                   float epsilon){
+        // transfer data to device
+        thrust::device_vector<cudaPoly> p1(polygons1.begin(), polygons1.end());
+        thrust::device_vector<cudaPoly> p2(polygons2.begin(), polygons2.end());
+        thrust::device_vector<float3> n1(normals1.begin(), normals1.end());
+        thrust::device_vector<float3> n2(normals2.begin(), normals2.end());
+        
+        // get detection result and the two affected particles if a collision is detected
+        // indices of particles
+        int polyInd1; int polyInd2; int vecInd1; int vecInd2; bool res;
+        // activate the cuda kernel
+        int N = (int)polygons1.size(); int M = (int)polygons2.size();
+        dim3 threadsPerBlock(16, 16);
+        dim3 blocksPerGrid((N + threadsPerBlock.x - 1) / threadsPerBlock.x, (M + threadsPerBlock.y - 1) / threadsPerBlock.y);
+        detect <<<blocksPerGrid, threadsPerBlock>>> (thrust::raw_pointer_cast(n1.data()),
+                                                     thrust::raw_pointer_cast(n2.data()),
+                                                     thrust::raw_pointer_cast(p1.data()),
+                                                     thrust::raw_pointer_cast(p2.data()),
+                                                     (int)polygons1.size(),
+                                                     (int)polygons2.size(),
+                                                     epsilon * epsilon,
+                                                     &polyInd1, &vecInd1,
+                                                     &polyInd2, &vecInd2, &res);
+                                                                
+        return (res) ? std::make_tuple(polyInd1, vecInd1, polyInd2, vecInd2) : std::make_tuple(-1, -1, -1, -1);
+    }
 }
 
 namespace colReact{

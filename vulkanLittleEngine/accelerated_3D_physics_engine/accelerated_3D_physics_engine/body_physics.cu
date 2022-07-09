@@ -231,20 +231,18 @@ auto multiply_3(std::vector<float3> m1, std::vector<float3> m2, operation status
 // area of the body.
 // for triangles with vertices v1i, v2i, v3i for all i in mesh, the areas:
 // s_i = 1/2|u1i x u2i| => sum_i(s_i) = sum_i(1/2|u1i x u2i|), u1i = v2i - v1i, u2i = v3i - v1i
-struct polygonAreaAddition : public thrust::binary_function<thrust::tuple<particle, particle, particle>,
-                                                            thrust::tuple<particle, particle, particle>,
-                                                            float> {
+struct polygonAreaAddition : public thrust::binary_function<cudaPoly, cudaPoly, float> {
 
-    __host__ __device__ float operator()(const thrust::tuple<particle, particle, particle>& polygon1,
-                                         const thrust::tuple<particle, particle, particle>& polygon2) {
+    __host__ __device__ float operator()(const cudaPoly& polygon1,
+                                         const cudaPoly& polygon2) {
 
         // get cross product in polygon1 : cross1 = u11 x u21
-        auto cross1 = thrust_cross(thrust_minus(thrust::get<0>(polygon1).center, thrust::get<1>(polygon1).center),
-                                   thrust_minus(thrust::get<0>(polygon1).center, thrust::get<2>(polygon1).center));
+        auto cross1 = thrust_cross(thrust_minus(polygon1.v1, polygon1.v2),
+                                   thrust_minus(polygon1.v1, polygon1.v3));
         
         // get cross product in polygon2 : cross2 = u21 x u22
-        auto cross2 = thrust_cross(thrust_minus(thrust::get<0>(polygon2).center, thrust::get<1>(polygon2).center),
-                                   thrust_minus(thrust::get<0>(polygon2).center, thrust::get<2>(polygon2).center));
+        auto cross2 = thrust_cross(thrust_minus(polygon2.v1, polygon2.v2),
+                                   thrust_minus(polygon2.v1, polygon2.v3));
 
         // return the sum of areas : 1/2 |cross1| + 1/2 |cross2| = 1/2 |u11 x u21| + 1/2 |u21 x u22| = s1 + s2
         return 0.5f * thrust_L2(cross1) + 0.5 * thrust_L2(cross2);

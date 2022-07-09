@@ -888,8 +888,8 @@ void mat<T>::transpose() {
 
 template<typename T>
 __global__ void cudaIdentity(T* data, int rows, int cols){
-	int x = blockDim.x*blockIdx.x + threadIdx.x;
-    int y = blockDim.y*blockIdx.y + threadIdx.y;
+	int x = blockDim.x * blockIdx.x + threadIdx.x;
+    int y = blockDim.y * blockIdx.y + threadIdx.y;
 
 	// column major
 	if(x < rows && y < cols){
@@ -897,6 +897,7 @@ __global__ void cudaIdentity(T* data, int rows, int cols){
 	}
 }
 
+template<typename T>
 void mat<T>::createIdentity(){
 	T* odata;
 	bool data_st = checkToAllocateOnDevice(data, &odata, M, N, memState);

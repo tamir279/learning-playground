@@ -1,5 +1,5 @@
 #include "body_physics.cuh"
-
+#include "collisionAlgorithms.cuh"
 
 /*
 -------------------------------- HEAP PROPERTIES --------------------------------
