@@ -268,9 +268,7 @@ private:
 struct pairInfo {
     float priority; // alpha * (distance)^-1 + beta * (body_speeds) , alpha, beta >= 0 , alpha + beta = 1
     thrust::pair<int, int> bodies;
-    thrust::pair<int, int> bodiesDimensions;
     thrust::pair<body_type, body_type> types;
-    int samplePeriod = 0; // number of time steps to wait between collision checks
 };
 
 // build a heap containing lower bound on distances between all bodies. body clusters that are closer 
@@ -320,10 +318,15 @@ class collision_handler{
 public:
 
     std::vector<float3> collisionImpulse;
+    std::vector<rigid_body> bodyList;
 
-    collision_handler(std::vector<pairInfo> initialSystemData) : priorityHeap(initialSystemData){
-        setSamplingRates();
+    collision_handler(const std::vector<rigid_body> _bodyList){
+        setPriority(_bodyList, 0.5f, 0.5f, CENTER_MASS, LINEAR_VELOCITY);
+        bodyList = _bodyList;
     }
+
+    // advance collision state in time step
+    void advanceInTime();
 
     void updateHeapData(std::vector<pairInfo> updatedHeap);
 
@@ -332,15 +335,13 @@ public:
 private:
 
     float velocityThreshold = 10e-2;
-    float epsilon = 0;
+    // initial value
+    float epsilon = 10e-2;
     collision_heap priorityHeap;
 
-    void setSamplingRates();
-    void samplePairState();
-    void detectCollision(); // using collisionAlgorithms
+    void setPriority(const std::vector<rigid_body> bodies, float alpha, float beta, EXT_pParam cm, EXT_pParam v);
+    void detectCollisions(); // using collisionAlgorithms
     void calculateImpulse(); // using collisionAlgorithms
-    void solveRestitutionConstrints();
-    void solveNonPenertrationConstraints();
 };
 
 // priority and body connection array are to be calculated in the total simulation class as a private parameter and

@@ -599,10 +599,10 @@ void rigid_body::initDisplacementVector() {
         (Displacement_n_1.data)[3 * i + 1] = 0.0f;
         (Displacement_n_1.data)[3 * i + 2] = 0.0f;
         // initial time t0
-        auto [x, y, z] = THRUSTtoSTDtuple(particles[i]);
-        (Displacement.data)[3 * i] = x;
-        (Displacement.data)[3 * i + 1] = y;
-        (Displacement.data)[3 * i + 2] = z;
+        auto [x, y, z] = THRUSTtoSTDtuple(particles[i].center);
+        (Displacement_n.data)[3 * i] = x;
+        (Displacement_n.data)[3 * i + 1] = y;
+        (Displacement_n.data)[3 * i + 2] = z;
     }
 }
 
@@ -768,7 +768,7 @@ F = external forces + f_g + f_pressure
 // TODO : calculate the constant matrices beforehand, so that current calculation will involve only 
 // the stiffness matrix 
 void rigid_body::updateDisplacementVector() {
-    auto F = decomposeExternalForces();
+    vector<float> F = decomposeExternalForces();
     /*
     ---------------- calculate theta = lambda + zeta ----------------
     */
@@ -781,8 +781,8 @@ void rigid_body::updateDisplacementVector() {
     // => Displacememt_n = zeta^-1 * (F + Theta * Displacement_n_1 - Displacement_n_2)
     solver.I_matrix(Zeta);
     solver.I_vector(F + Theta * Displacement_n_1 - Displacement_n_2);
-    Displacement_n_2 = Displacememt_n_1;
-    Displacement_n_1 = Displacememt_n;
+    Displacement_n_2 = Displacement_n_1;
+    Displacement_n_1 = Displacement_n;
     Displacement_n = solver.Solve();
 }
 
@@ -794,9 +794,9 @@ r_total = r_cm + q_r*r0*q_r^-1 + dr, dr = Q_t[i]
 void rigid_body::updatePosition() {
     quaternion rotation; rotation.createUnitQuarenion(flatten_3(rigidState[ROTATION]));
     // create dispacement vector iterator
-    auto x_iter = strided_iterator<float*>(Displacement.data, Displacement.data + 3 * systemSize - 2, 3);
-    auto y_iter = strided_iterator<float*>(Displacement.data + 1, Displacement.data + 3 * systemSize - 1, 3);
-    auto z_iter = strided_iterator<float*>(Displacement.data + 2, Displacement.data + 3 * systemSize, 3);
+    auto x_iter = strided_iterator<float*>(Displacement_n.data, Displacement_n.data + 3 * systemSize - 2, 3);
+    auto y_iter = strided_iterator<float*>(Displacement_n.data + 1, Displacement_n.data + 3 * systemSize - 1, 3);
+    auto z_iter = strided_iterator<float*>(Displacement_n.data + 2, Displacement_n.data + 3 * systemSize, 3);
     // iterate over all particles
     auto zip_begin = thrust::make_zip_iterator(thrust::make_tuple(x_iter.begin(),
                                                                   y_iter.begin(),
