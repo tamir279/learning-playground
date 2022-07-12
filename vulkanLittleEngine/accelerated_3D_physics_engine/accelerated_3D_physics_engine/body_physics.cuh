@@ -58,6 +58,7 @@ public:
 
     // built data for fast calculations
     std::vector<float3> bounding_box;
+    std::tuple<float, float, float> boxDims;
 
     // construction
     geometricData(const std::string modelPath){
@@ -317,12 +318,15 @@ public:
 class collision_handler{
 public:
 
+    // the size of numBodies = |_bodyList|
     std::vector<float3> collisionImpulse;
+    std::vector<int> particleIndices;
     std::vector<rigid_body> bodyList;
 
     collision_handler(const std::vector<rigid_body> _bodyList){
         setPriority(_bodyList, 0.5f, 0.5f, CENTER_MASS, LINEAR_VELOCITY);
         bodyList = _bodyList;
+        initImpulseVector();
     }
 
     // advance collision state in time step
@@ -330,18 +334,23 @@ public:
 
     void updateHeapData(std::vector<pairInfo> updatedHeap);
 
-    void updateForces(std::vector<float3>& forceDistribution);
+    void updateForces(std::vector<rigid_body>& _bodyList, EXT_pParam forceParam);
 
 private:
 
     float velocityThreshold = 10e-2;
-    // initial value
-    float epsilon = 10e-2;
+    float epsilon;
     collision_heap priorityHeap;
 
+    // initializes impulse vector and particle index vector - we assume that one particle is contacted per body
+    void initImpulseVector();
     void setPriority(const std::vector<rigid_body> bodies, float alpha, float beta, EXT_pParam cm, EXT_pParam v);
     void detectCollisions(); // using collisionAlgorithms
-    void calculateImpulse(); // using collisionAlgorithms
+    float3 calculateImpulse(rigid_body body1, rigid_body body2, 
+                            int ind1poly, int ind1vec,
+                            int ind2poly, int ind2vec,
+                            EXT_pParam stateParam, EXT_pParam linearV,
+                            EXT_pParam angularV); // using collisionAlgorithms
 };
 
 // priority and body connection array are to be calculated in the total simulation class as a private parameter and

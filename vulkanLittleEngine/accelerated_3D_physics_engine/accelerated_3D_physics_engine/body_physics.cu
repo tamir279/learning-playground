@@ -632,14 +632,17 @@ void rigid_body::init() {
 
 // calculate updated body volume - for pressure force calculations and
 // for deformation measuring - approximating with a box  
-// option for accurate integration : gauss' law
+// option for accurate integration : gauss' law 
 void rigid_body::calculateBodyVolume() {
-    auto [x, y, z] = findBoxDimensions(bodySurface.bounding_box);
+    auto [x, y, z] = findBoxDimensions(bodySurface.bounding_box); 
+    bodySurface.boxDims = std::make_tuple(x, y, z);
     V_approx = x * y * z;
 }
 
 // calculate the pressure force (as part of "external forces", even though it is an internal one...)
 // Fi = 1/v (nRT) (p_si - p_e) for each particle i
+// oprtion for better results : calculate each point volume with the surface polygon that creates a tetrahedron 
+// with the point and the pressure force on the point will be dependent of the tetrahedron volume and polygon normal direction
 void rigid_body::calculatePressureForce(){
     float magnitude = calculatePressureForceMagnitude(n, R, T, V_approx, bodySurface);
     thrust::device_vector<float3> res(rigidState[SPRING_DIRECTION].begin(),
