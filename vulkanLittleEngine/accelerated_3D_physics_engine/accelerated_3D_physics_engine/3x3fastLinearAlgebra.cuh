@@ -67,9 +67,24 @@ public:
 		return make_float3(dot(data.row1, vec), dot(data.row2, vec), dot(data.row3, vec));
 	}
 
-	void inverse();
+	void inverse() {
+		auto [r1, r2, r3] = data;
+		float d = det(data);
+		data.row1 = make_float3((r2.y * r3.z - r2.z * r3.y) / d,
+								(r1.z * r3.y - r1.y * r3.z) / d,
+								(r1.y * r2.z - r1.z * r2.y) / d);
+		data.row2 = make_float3((r2.z * r3.x - r2.x * r3.z) / d,
+								(r1.x * r3.z - r1.z * r3.x) / d,
+								(r1.z * r2.x - r1.x * r2.z) / d);
+		data.row2 = make_float3((r2.x * r3.y - r2.y * r3.x) / d,
+								(r1.y * r3.x - r1.x * r3.y) / d,
+								(r1.x * r2.y - r1.y * r2.x) / d);
+	}
 
-	mat3 Inverse();
+	mat3 Inverse() {
+		mat3 res(data); res.inverse();
+		return res;
+	}
 
 private:
 
@@ -99,5 +114,8 @@ float mat3::dot(float3 v1, float3 v2) {
 }
 
 float mat3::det(mat3_data matrix) {
-
+	auto [r1, r2, r3] = matrix;
+	return r1.x * (r2.y * r3.z - r2.z * r3.y) +
+		   r1.y * (r3.x * r2.z - r2.x * r3.z) +
+		   r1.z * (r2.x * r3.y - r3.x * r2.y);
 }

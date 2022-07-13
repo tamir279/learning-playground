@@ -147,8 +147,15 @@ namespace colDetect{
 
 namespace colReact{
 
-    mat3 vecToStruct3x3(std::vector<float3> mat);
-    std::vector<float3> structToVec3x3(mat3 mat);
+    mat3 vecToStruct3x3(std::vector<float3> mat) {
+        mat3_data matData; 
+        matData.row1 = mat[0]; matData.row2 = mat[1]; matData.row3 = mat[2];
+        mat3 res(matData);
+        return res;
+    }
+    std::vector<float3> structToVec3x3(mat3 mat) {
+        return { mat.data.row1, mat.data.row2, mat.data.row3 };
+    }
 
     // calculate K = (1/m1 + 1/m2) * 1 - r1 * I1^-1 * r1 - r2 * I2^-1 * r2
     /*

@@ -177,7 +177,7 @@ public:
     Displacement_n(3*size, 1, memLocation::DEVICE),
     Displacement_n_1(3*size, 1, memLocation::DEVICE),
     Displacement_n_2(3*size, 1, memLocation::DEVICE),
-    solver(QR, false),
+    solver((DECOMP)QR, false),
     bodySurface(modelPath){
         // get geometric data
         readGeometryToData(modelPath);
@@ -324,7 +324,7 @@ public:
     std::vector<rigid_body> bodyList;
 
     collision_handler(const std::vector<rigid_body> _bodyList){
-        setPriority(_bodyList, 0.5f, 0.5f, CENTER_MASS, LINEAR_VELOCITY);
+        setPriority(_bodyList, 0.5f, 0.5f, (EXT_pParam)CENTER_MASS, (EXT_pParam)LINEAR_VELOCITY);
         bodyList = _bodyList;
         initImpulseVector();
     }
