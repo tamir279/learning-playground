@@ -775,15 +775,15 @@ void rigid_body::updateDisplacementVector() {
     /*
     ---------------- calculate theta = lambda + zeta ----------------
     */
-    mat<float> Lambda = identity + invMassMatrix * stiffnessMatrix;
-    auto Theta = Zeta + Lambda;
+    mat<float> Theta = Zeta + identity + invMassMatrix * stiffnessMatrix;
+    auto totalForce = F + Theta % Displacement_n_1 - Displacement_n_2;
     /*
     ---------------- calculate displacement ----------------
     */
     // zeta * Displacememt_n = F + Theta * Displacement_n_1 - Displacement_n_2
     // => Displacememt_n = zeta^-1 * (F + Theta * Displacement_n_1 - Displacement_n_2)
     solver.I_matrix(Zeta);
-    solver.I_vector(F + Theta * Displacement_n_1 - Displacement_n_2);
+    solver.I_vector(totalForce);
     Displacement_n_2 = Displacement_n_1;
     Displacement_n_1 = Displacement_n;
     Displacement_n = solver.Solve();
